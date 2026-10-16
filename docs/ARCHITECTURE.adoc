@@ -511,3 +511,19 @@ their precedence. Preference changes invalidate the foreground network plan;
 headless DM reads load the same account preferences. Empty groups remain empty
 and show a warning. Test-account lockdown overrides preferences and continues
 to route exclusively through the test relay.
+
+== Market shortcuts (#1616)
+
+The Market header exposes the shared profile avatar alongside search and filters.
+A horizontally scrollable row below it links to Liked, My orders and My shop
+(or Start selling when the account has no listings). The account drawer links
+to Orders and My shop through the Explore stack from every tab.
+
+`MarketShortcutsContext` shares memoised buyer and seller action counts between
+the row and drawer. Existing buyer/seller hooks read account-scoped local order
+snapshots; the seller shop hook reuses its shared store and bounded fetch. Buyer
+actions are unpaid or expired invoices; seller actions are missing or expired
+invoices, using the same status derivation as seller orders. Zero action badges
+are hidden. Liked uses `useLikedListings` while Market is focused, so returning
+from a product refreshes the count. No additional live relay subscriptions are
+created.

@@ -2814,6 +2814,10 @@
       "alreadyPresent": "已存在",
       "close": "关闭",
       "failed": "重新发布失败"
+    },
+    "shortcuts": {
+      "liked": "已喜欢",
+      "startSelling": "开始卖货"
     }
   },
   "dmProtocol": {

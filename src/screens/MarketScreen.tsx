@@ -14,7 +14,7 @@ import { useLocale } from '../contexts/LocaleContext';
 import { useGroups } from '../contexts/GroupsContext';
 import { useMarketScopeListings } from '../hooks/useMarketScopeListings';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
-import { useBuyerOrders } from '../hooks/useBuyerOrders';
+import MarketShortcuts from '../components/MarketShortcuts';
 import { createMarketScreenStyles } from '../styles/MarketScreen.styles';
 import { sellerOf, type MarketProduct } from '../data/marketProducts';
 import { featuredFirst } from '../utils/marketVendors';
@@ -46,7 +46,6 @@ interface Props {
 const MarketScreen: React.FC<Props> = ({ navigation, route }) => {
   const colors = useThemeColors();
   const { t, locale, formatLocale } = useLocale();
-  const { payNow } = useBuyerOrders();
   const styles = useMemo(() => createMarketScreenStyles(colors), [colors]);
 
   // Derive the square tile width from the live window so rotation / tablet
@@ -248,6 +247,7 @@ const MarketScreen: React.FC<Props> = ({ navigation, route }) => {
   return (
     <View style={styles.container} testID="market-screen">
       <MarketHeader
+        showProfile
         title={t('market.screen.title')}
         backLabel={t('market.screen.back')}
         onBack={() => navigation.goBack()}
@@ -259,10 +259,10 @@ const MarketScreen: React.FC<Props> = ({ navigation, route }) => {
           filtersActive={filtersActive}
           activeFilterCount={activeFilterCount}
           onOpenFilters={openFilters}
-          navigation={navigation}
-          payNow={payNow}
         />
       </MarketHeader>
+
+      <MarketShortcuts navigation={navigation} />
 
       {/* The seller scope is always shown as a pill: Preferred's opens
           Filters; every other scope's × returns to Preferred. */}

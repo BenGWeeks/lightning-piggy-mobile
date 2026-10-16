@@ -116,8 +116,20 @@ jest.mock('../components/MarketHeader', () => {
   };
 });
 jest.mock('../components/MarketProductCard', () => () => null);
-let mockPayNow = 0;
-jest.mock('../hooks/useBuyerOrders', () => ({ useBuyerOrders: () => ({ payNow: mockPayNow }) }));
+let mockBuyerActions = 0;
+let mockSellerActions = 0;
+let mockHasListings = false;
+let mockLikedProducts: { id: string }[] = [];
+jest.mock('../hooks/useLikedListings', () => ({
+  useLikedListings: () => ({ products: mockLikedProducts }),
+}));
+jest.mock('../contexts/MarketShortcutsContext', () => ({
+  useMarketShortcutCounts: () => ({
+    buyer: mockBuyerActions,
+    seller: mockSellerActions,
+    hasListings: mockHasListings,
+  }),
+}));
 jest.mock('../hooks/usePreferredMarketListings', () => ({
   usePreferredMarketListings: () => ({
     products: mockLiveProducts.length
@@ -152,7 +164,7 @@ jest.mock('lucide-react-native', () => ({
   ChevronLeft: () => null,
   Heart: () => null,
   MoreVertical: () => null,
-  ShoppingBag: () => null,
+  Package: () => null,
   Search: () => null,
   SlidersHorizontal: () => null,
   Store: () => null,
@@ -184,7 +196,10 @@ jest.mock('../hooks/useMarketFofAuthors', () => ({
 const navigation = { goBack: jest.fn(), navigate: jest.fn() } as unknown as ExploreNavigation;
 
 beforeEach(() => {
-  mockPayNow = 0;
+  mockBuyerActions = 0;
+  mockSellerActions = 0;
+  mockHasListings = false;
+  mockLikedProducts = [];
   jest.useFakeTimers();
   mockLiveEnabled.mockClear();
   mockFofEnabled.mockClear();
@@ -600,10 +615,9 @@ it.each(['preferred', 'wotFriends'] as const)(
   },
 );
 
-it('opens Liked items from the header menu', () => {
+it('opens Liked items from the shortcut row', () => {
   const screen = render(<MarketScreen navigation={navigation} />);
-  fireEvent.press(screen.getByTestId('market-header-menu'));
-  fireEvent.press(screen.getByTestId('market-liked-items-button'));
+  fireEvent.press(screen.getByTestId('market-shortcut-liked'));
   expect(navigation.navigate).toHaveBeenCalledWith('MarketLikedItems');
 });
 
@@ -711,22 +725,45 @@ it('expands and closes header search, clearing the query', () => {
 });
 
 it.each([
-  ['market-my-shop-button', 'MarketMyShop'],
-  ['market-my-orders-button', 'MarketMyOrders'],
-])('opens %s from the single header menu', (id, route) => {
+  ['market-shortcut-shop', 'MarketMyShop'],
+  ['market-shortcut-orders', 'MarketMyOrders'],
+])('opens %s from the shortcut row', (id, route) => {
   const screen = render(<MarketScreen navigation={navigation} />);
-  fireEvent.press(screen.getByTestId('market-header-menu'));
   fireEvent.press(screen.getByTestId(id));
   expect(navigation.navigate).toHaveBeenCalledWith(route);
   expect(screen.queryByTestId('market-menu-close')).toBeNull();
 });
 
-it.each([1, 12])('keeps the buyer invoice badge in the menu for %s invoices', (count) => {
-  mockPayNow = count;
+it.each([1, 12])('shows the buyer action badge for %s orders', (count) => {
+  mockBuyerActions = count;
   const screen = render(<MarketScreen navigation={navigation} />);
-  expect(screen.queryByTestId('market-my-orders-button')).toBeNull();
-  fireEvent.press(screen.getByTestId('market-header-menu'));
-  expect(screen.getByTestId('market-my-orders-badge')).toHaveTextContent(count > 9 ? '9+' : '1');
-  fireEvent.press(screen.getByTestId('market-my-orders-button'));
+  expect(screen.getByTestId('market-shortcut-orders-badge')).toHaveTextContent(String(count));
+  fireEvent.press(screen.getByTestId('market-shortcut-orders'));
   expect(navigation.navigate).toHaveBeenCalledWith('MarketMyOrders');
+});
+
+it('hides zero action badges and offers Start selling without listings', () => {
+  const screen = render(<MarketScreen navigation={navigation} />);
+  expect(screen.queryByTestId('market-shortcut-orders-badge')).toBeNull();
+  expect(screen.queryByTestId('market-shortcut-shop-badge')).toBeNull();
+  expect(screen.getByTestId('market-shortcut-shop')).toHaveTextContent(
+    'market.shortcuts.startSelling',
+  );
+});
+
+it('shows the number of liked listings, including zero', () => {
+  const screen = render(<MarketScreen navigation={navigation} />);
+  expect(screen.getByTestId('market-shortcut-liked-badge')).toHaveTextContent('0');
+  mockLikedProducts = [{ id: 'one' }, { id: 'two' }, { id: 'three' }];
+  screen.unmount();
+  const updated = render(<MarketScreen navigation={navigation} />);
+  expect(updated.getByTestId('market-shortcut-liked-badge')).toHaveTextContent('3');
+});
+
+it('shows My shop and its action badge for a seller with listings', () => {
+  mockHasListings = true;
+  mockSellerActions = 4;
+  const screen = render(<MarketScreen navigation={navigation} />);
+  expect(screen.getByText('market.sell.myShop')).toBeTruthy();
+  expect(screen.getByTestId('market-shortcut-shop-badge')).toHaveTextContent('4');
 });
