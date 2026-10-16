@@ -16,7 +16,7 @@ export function listingTargetRelays(
 ): string[] {
   const urls = [
     ...relays.filter((r) => r.write).map((r) => r.url),
-    ...enabledAppRelays('market', MARKET_RELAYS),
+    ...enabledAppRelays('market', MARKET_RELAYS, pubkey),
   ].flatMap((url) => {
     try {
       const parsed = new URL(url.trim());

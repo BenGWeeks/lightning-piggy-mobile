@@ -137,3 +137,49 @@ it('does not sync or change the live plan when persistence fails', async () => {
   expect(enabledAppRelays('default', relays, alice)).toEqual(relays);
   expect(syncBackgroundDmWatchFromPreference).not.toHaveBeenCalled();
 });
+
+it('retries failed hydration from ordinary reads, coalesces retries, and keeps disabled relays closed', async () => {
+  await AsyncStorage.setItem(
+    perAccountKey(APP_RELAY_PREFS_KEY, alice),
+    JSON.stringify({ default: [relays[0]] }),
+  );
+  const now = jest.spyOn(Date, 'now').mockReturnValue(1000);
+  const read = jest
+    .spyOn(AsyncStorage, 'getItem')
+    .mockClear()
+    .mockRejectedValueOnce(new Error('offline'));
+  await expect(loadAppRelayPrefs(alice)).rejects.toThrow('offline');
+  expect(enabledAppRelays('default', relays, alice)).toEqual([]);
+  expect(read).toHaveBeenCalledTimes(1);
+  now.mockReturnValue(2000);
+  let resolveRead!: (raw: string | null) => void;
+  read.mockImplementationOnce(() => new Promise((resolve) => (resolveRead = resolve)));
+  const listener = jest.fn();
+  const unsubscribe = subscribeAppRelayPrefs(listener);
+  expect(enabledAppRelays('default', relays, alice.toUpperCase())).toEqual([]);
+  expect(enabledAppRelays('default', relays, alice)).toEqual([]);
+  expect(read).toHaveBeenCalledTimes(2);
+  resolveRead(JSON.stringify({ default: [relays[0]] }));
+  await loadAppRelayPrefs(alice);
+  expect(enabledAppRelays('default', relays, alice)).toEqual([relays[1]]);
+  expect(listener).toHaveBeenCalledTimes(1);
+  unsubscribe();
+});
+
+it('backs off repeated storage failures and forgetting an account cancels read-triggered retries', async () => {
+  const now = jest.spyOn(Date, 'now').mockReturnValue(1000);
+  const read = jest
+    .spyOn(AsyncStorage, 'getItem')
+    .mockClear()
+    .mockRejectedValue(new Error('offline'));
+  await expect(loadAppRelayPrefs(alice)).rejects.toThrow('offline');
+  now.mockReturnValue(2000);
+  expect(enabledAppRelays('default', relays, alice)).toEqual([]);
+  await expect(loadAppRelayPrefs(alice)).rejects.toThrow('offline');
+  expect(enabledAppRelays('default', relays, alice)).toEqual([]);
+  expect(read).toHaveBeenCalledTimes(2);
+  await forgetAppRelayPrefs(alice);
+  now.mockReturnValue(4000);
+  expect(enabledAppRelays('default', relays, alice)).toEqual([]);
+  expect(read).toHaveBeenCalledTimes(2);
+});

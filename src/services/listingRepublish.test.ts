@@ -1,3 +1,4 @@
+import { loadAppRelayPrefs } from './appRelayPrefs';
 import { finalizeEvent, getPublicKey, type Event } from 'nostr-tools';
 import {
   listingTargetRelays,
@@ -20,7 +21,8 @@ const sign = (created_at: number, d = 'item') =>
 const publish = jest.fn();
 const release = jest.fn();
 const signal = () => new AbortController().signal;
-beforeEach(() => {
+beforeEach(async () => {
+  await loadAppRelayPrefs(me);
   jest.clearAllMocks();
   (acquireMarketListingsPool as jest.Mock).mockReturnValue({ pool: { publish }, release });
 });

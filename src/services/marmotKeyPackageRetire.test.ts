@@ -1,3 +1,6 @@
+import { forgetAppRelayPrefs, setAppRelayEnabled } from './appRelayPrefs';
+import { setCurrentUserPubkey } from './nostrActiveAccount';
+import { DEFAULT_RELAYS } from './nostrRelayDefaults';
 import {
   finalizeEvent,
   generateSecretKey,
@@ -9,6 +12,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import {
   MAX_RETIREMENT_ATTEMPTS,
+  retireFootprint,
   buildKeyPackageDeletion,
   localKeyPackageFootprint,
   retireMarmotKeyPackages,
@@ -332,4 +336,24 @@ test('batches sign-out queries and publications and excludes expired copied dest
     expect(destinations).toEqual(expect.arrayContaining(relays));
     expect(destinations).not.toContain('wss://expired.example');
   }
+});
+
+test('hydrates retirement defaults for the owner after an account switch', async () => {
+  await setAppRelayEnabled(owner, 'default', DEFAULT_RELAYS[0], false);
+  await forgetAppRelayPrefs(owner);
+  setCurrentUserPubkey(null);
+  const query = jest.fn(async (_relays: string[], _filter: unknown) => [] as NostrEvent[]);
+  const t = transport([]);
+  await retireFootprint({
+    owner,
+    footprint: { slots: [SLOT], eventIds: [], relays: [] },
+    sign,
+    transport: { ...t.t, query },
+  });
+  const targets = query.mock.calls;
+  expect(targets.length).toBeGreaterThan(0);
+  expect(targets[0][0]).not.toContain(DEFAULT_RELAYS[0]);
+  expect(targets[0][0]).toContain(DEFAULT_RELAYS[1]);
+  await setAppRelayEnabled(owner, 'default', DEFAULT_RELAYS[0], true);
+  await forgetAppRelayPrefs(owner);
 });

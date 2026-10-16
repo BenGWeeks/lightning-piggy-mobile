@@ -12,6 +12,7 @@ import { RELAY_LIST_INDEXERS, relayListPublishTargets } from '../utils/relayList
 import { MARMOT_KEY_PACKAGE_RELAYS, keyPackagePublishRelays } from './marmotKeyPackageRelays';
 import { mergeRelays } from './nostrRelayStorage';
 import { appReadRelays } from './appReadRelays';
+import { nip17TargetRelays } from './nip17RumorSend';
 import { listingTargetRelays } from './listingRepublish';
 
 const owner = 'a'.repeat(64);
@@ -118,4 +119,17 @@ it('guards every source-constant consumer against bypassing per-account preferen
   }
   scan(path.join(process.cwd(), 'src'));
   expect(violations).toEqual([]);
+});
+
+it('binds marketplace and NIP-17 defaults to the caller after the active account changes', async () => {
+  const other = 'b'.repeat(64);
+  await loadAppRelayPrefs(other);
+  await setAppRelayEnabled(owner, 'default', DEFAULT_RELAYS[0], false);
+  await setAppRelayEnabled(owner, 'market', MARKET_RELAYS[0], false);
+  setCurrentUserPubkey(other);
+  expect(nip17TargetRelays([], owner)).not.toContain(DEFAULT_RELAYS[0]);
+  expect(nip17TargetRelays([], other)).toContain(DEFAULT_RELAYS[0]);
+  expect(listingTargetRelays(owner, [])).not.toContain(MARKET_RELAYS[0]);
+  expect(listingTargetRelays(other, [])).toContain(MARKET_RELAYS[0]);
+  await forgetAppRelayPrefs(other);
 });

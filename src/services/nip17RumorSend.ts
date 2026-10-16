@@ -62,10 +62,16 @@ export function canSendNip17(pubkey: string | null, signerType: string | null | 
 }
 
 /** Write relays ∪ defaults (publish is Promise.any — one responsive relay suffices). */
-export function nip17TargetRelays(relays: Pick<RelayConfig, 'url' | 'write'>[]): string[] {
+export function nip17TargetRelays(
+  relays: Pick<RelayConfig, 'url' | 'write'>[],
+  senderPubkey?: string,
+): string[] {
   const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
   return Array.from(
-    new Set([...writeRelays, ...enabledAppRelays('default', nostrService.DEFAULT_RELAYS)]),
+    new Set([
+      ...writeRelays,
+      ...enabledAppRelays('default', nostrService.DEFAULT_RELAYS, senderPubkey),
+    ]),
   );
 }
 
@@ -85,7 +91,7 @@ export async function sendNip17Rumor(input: SendNip17RumorInput): Promise<DmSend
   if (!/^[0-9a-f]{64}$/.test(recipient)) {
     throw new Nip17SendError('noRecipient', 'Recipient has no valid Nostr pubkey');
   }
-  const targetRelays = nip17TargetRelays(input.relays);
+  const targetRelays = nip17TargetRelays(input.relays, pubkey);
 
   let result: DmSendResult;
   if (signerType === 'nsec') {

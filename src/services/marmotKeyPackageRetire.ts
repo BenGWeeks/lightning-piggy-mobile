@@ -1,4 +1,4 @@
-import { enabledAppRelays } from './appRelayPrefs';
+import { enabledAppRelays, loadAppRelayPrefs } from './appRelayPrefs';
 // Removing an account's Marmot invitation keys (kind-30443 key packages)
 // from relays when it signs out of this install (#1204).
 //
@@ -221,12 +221,13 @@ export async function retireFootprint(opts: RetireFootprintOptions): Promise<Ret
   };
   if (footprint.slots.length === 0 && footprint.eventIds.length === 0) return 'nothing';
   try {
+    await loadAppRelayPrefs(owner);
     const hints = footprint.relays.filter(isRelayUrl);
     const lookup = [
       ...new Set([
         ...(opts.relays ?? []),
         ...hints,
-        ...enabledAppRelays('default', DEFAULT_RELAYS),
+        ...enabledAppRelays('default', DEFAULT_RELAYS, owner),
       ]),
     ].filter(isRelayUrl);
     // Our key packages live on our NIP-65 write relays — send the deletion there too.

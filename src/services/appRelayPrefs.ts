@@ -10,6 +10,8 @@ type Preferences = Partial<Record<AppRelayGroup, string[]>>;
 const EMPTY_RELAYS: string[] = [];
 const accounts = new Map<string, Preferences>();
 const loading = new Map<string, Promise<void>>();
+const retryAfter = new Map<string, number>();
+const RETRY_COOLDOWN_MS = 1000;
 const listeners = new Set<() => void>();
 let revision = 0;
 const normalise = (url: string) => url.trim().replace(/\/+$/, '').toLowerCase();
@@ -47,8 +49,13 @@ export function loadAppRelayPrefs(pubkey: string): Promise<void> {
           /* Invalid preferences start with all relays enabled. */
         }
       }
+      retryAfter.delete(pubkey);
       accounts.set(pubkey, prefs);
       notify();
+    })
+    .catch((error) => {
+      retryAfter.set(pubkey, Date.now() + RETRY_COOLDOWN_MS);
+      throw error;
     })
     .finally(() => loading.delete(pubkey));
   loading.set(pubkey, task);
@@ -73,7 +80,15 @@ export function enabledAppRelays<T extends readonly string[]>(
   if (!pubkey) return list;
   const prefs = accounts.get(pubkey.toLowerCase());
   // Never briefly connect to a disabled default while storage is loading.
-  if (!prefs) return EMPTY_RELAYS;
+  if (!prefs) {
+    const retryAt = retryAfter.get(pubkey.toLowerCase());
+    // Ordinary reads retry failed hydration, sharing one load and backing off
+    // storage failures. Keep defaults closed until a successful load notifies consumers.
+    if (retryAt !== undefined && Date.now() >= retryAt) {
+      void loadAppRelayPrefs(pubkey).catch(() => {});
+    }
+    return EMPTY_RELAYS;
+  }
   if (!prefs[group]?.length) return list;
   const disabled = new Set(prefs[group]);
   return list.filter((url) => !disabled.has(normalise(url)));
@@ -127,5 +142,6 @@ export async function forgetAppRelayPrefs(pubkey: string): Promise<void> {
   await loading.get(pubkey)?.catch(() => {});
   await writes.catch(() => {});
   accounts.delete(pubkey);
+  retryAfter.delete(pubkey);
   notify();
 }

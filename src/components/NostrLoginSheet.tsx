@@ -1,4 +1,4 @@
-import { enabledAppRelays } from '../services/appRelayPrefs';
+import { enabledAppRelays, loadAppRelayPrefs } from '../services/appRelayPrefs';
 import { TEST_ACCOUNT_KEYS } from '../utils/testAccounts';
 import { isTestRelayLockdown, TEST_RELAY_URL } from '../config/testRelayLockdown';
 import BrandedSpinner from './BrandedSpinner';
@@ -170,10 +170,11 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
     // list, so later follows always have a kind-3 to build on (#1271).
     // Best-effort and never for imported / signed-in keys.
     const { pubkey: newPubkey, secretKey } = nostrService.decodeNsec(generatedNsec);
+    await loadAppRelayPrefs(newPubkey).catch(() => {});
     void setUpNewAccountContactList({
       pubkey: newPubkey,
       secretKey,
-      relays: enabledAppRelays('default', nostrService.DEFAULT_RELAYS),
+      relays: enabledAppRelays('default', nostrService.DEFAULT_RELAYS, newPubkey),
     }).catch((e) => {
       if (__DEV__) console.warn('[ContactList] new-account setup failed:', e);
     });

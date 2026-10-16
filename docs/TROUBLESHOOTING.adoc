@@ -4,6 +4,9 @@
 |===
 | Problem | Solution
 
+| App relays stay empty after a temporary preference-storage failure, or background account work uses another account's switches
+| Preference hydration errors keep app defaults closed. Ordinary relay reads retry failed loads after a one-second cooldown, sharing an in-flight load and notifying consumers only after success. The active-account hook also retries every three seconds until success, cancelling queued retries on switch or unmount. New-account contact-list setup awaits hydration before selecting defaults. Account-owned Marmot, NIP-17 and marketplace operations pass their owning identity to preference lookups across account changes. Regression coverage: `appRelayPrefs.test.ts`, `appRelayConsumers.test.ts`, `marmotNetwork.test.ts` and the invitation-key discovery/retirement tests.
+
 | Marmot says "You added 2 devices (Unknown app ×2)" while the other participant sees their app names
 | The inviter caches kind-30443 `client` tags against MLS leaf signature keys. A receiving install sees only the Add commit's leaves, and only its own current leaf has a built-in app name; its account's other installs need the same key-package lookup as anyone else's. The notices hook now starts the existing bounded, cooldown-protected read-only lookup on focus and a newly observed epoch, without requiring the device-details sheet. Learned names trigger a reread, not another lookup. Notices persist signature keys, not labels, so existing notices update when a matching published package is found. An absent/replaced or untagged package stays unknown; the account pubkey never implies an app. This notice path uses key-package client tags, not MIP-06 device metadata. Regressions: `useMarmotDevices.test.ts`, `marmotDeviceTracker.test.ts` and the real MLS `marmotSessionDevices.test.ts`.
 

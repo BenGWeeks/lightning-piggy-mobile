@@ -96,7 +96,7 @@ async function maintainDiscovery(
             ...cleanKeyPackageRelays(previousList ? (JSON.parse(previousList) as string[]) : []),
             ...cleanKeyPackageRelays(cached ? cached.tags.map((t) => t[1]) : []),
             ...pendingTargets,
-            ...enabledAppRelays('indexers', RELAY_LIST_INDEXERS),
+            ...enabledAppRelays('indexers', RELAY_LIST_INDEXERS, owner),
           ]),
         ];
     let signed = cached && pendingFingerprint === fingerprint ? cached : undefined;

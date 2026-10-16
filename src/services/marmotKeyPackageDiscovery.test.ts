@@ -1,3 +1,6 @@
+import { forgetAppRelayPrefs, setAppRelayEnabled } from './appRelayPrefs';
+import { setCurrentUserPubkey } from './nostrActiveAccount';
+import { RELAY_LIST_INDEXERS } from '../utils/relayListEvents';
 import type { MarmotClient } from '@internet-privacy/marmot-ts';
 import type { Event as NostrEvent, EventTemplate, Filter } from 'nostr-tools';
 import { TEST_ACCOUNT_PUBKEYS, TEST_RELAY_URL } from '../config/testRelayLockdown';
@@ -301,4 +304,16 @@ it('bounds every batch across 30 relay edits without retaining acknowledged corr
     relays: Array.from({ length: 9 }, (_, i) => `wss://edit-29-${i}.example`),
   });
   expect(t.publish.mock.calls.slice(calls)).toEqual([[[rejecting], finalList]]);
+});
+
+it('keeps discovery indexers bound to the owner after the active account changes', async () => {
+  const indexer = RELAY_LIST_INDEXERS[0];
+  await setAppRelayEnabled(owner, 'indexers', indexer, false);
+  const t = setup();
+  setCurrentUserPubkey(null);
+  await maintainDiscoverableKeyPackage(t.client, t.backend, owner, t.opts);
+  expect(t.publish.mock.calls[1][0]).not.toContain(indexer);
+  expect(t.publish.mock.calls[1][0]).toContain(RELAY_LIST_INDEXERS[1]);
+  await setAppRelayEnabled(owner, 'indexers', indexer, true);
+  await forgetAppRelayPrefs(owner);
 });
