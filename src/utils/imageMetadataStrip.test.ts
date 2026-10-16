@@ -1,6 +1,7 @@
 import { Buffer } from 'buffer';
 import {
   detectImageMime,
+  hasImageFilename,
   stripImageMetadataBytes,
   stripJpegMetadata,
   stripPngMetadata,
@@ -165,10 +166,25 @@ it.each([
   [[137, 80, 78, 71, 13, 10, 26, 10], 'image/png'],
   [[...ascii('RIFF'), 0, 0, 0, 0, ...ascii('WEBP')], 'image/webp'],
   [ascii('GIF89a'), 'image/gif'],
+  [ascii('II*\0'), 'image/tiff'],
+  [ascii('MM\0*'), 'image/tiff'],
+  [ascii('II+\0'), 'image/tiff'],
+  [ascii('MM\0+'), 'image/tiff'],
   [[0, 0, 0, 24, ...ascii('ftypheic')], 'image/heif'],
   [[0, 0, 0, 24, ...ascii('ftypavif')], 'image/avif'],
   [ascii('%PDF-1.4'), undefined],
   [[], undefined],
 ])('detects image signatures in %j', (header, mime) => {
   expect(detectImageMime(new Uint8Array(header as number[]))).toBe(mime);
+});
+
+it.each([
+  ['photo.TIFF', true],
+  ['photo.dng', true],
+  ['photo.jpeg', true],
+  ['drawing.svg', true],
+  ['document.pdf', false],
+  ['photo.jpg.pdf', false],
+])('recognizes the final image extension in %s', (name, expected) => {
+  expect(hasImageFilename(name)).toBe(expected);
 });

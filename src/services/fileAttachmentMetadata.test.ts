@@ -76,6 +76,8 @@ it.each([
   ['image/webp', [...Buffer.from('RIFF'), 4, 0, 0, 0, ...Buffer.from('WEBP')]],
   ['image/heif', [0, 0, 0, 24, ...Buffer.from('ftypheic')]],
   ['image/gif', [...Buffer.from('GIF89a')]],
+  ['image/tiff', [...Buffer.from('II*\0')]],
+  ['image/tiff', [...Buffer.from('MM\0*')]],
 ])(
   're-encodes invalid or unsupported %s signatures even with generic MIME',
   async (_mime, header) => {
@@ -89,5 +91,16 @@ it.each([
     );
     expect(strip).toHaveBeenCalledWith('file:///opaque', base64, { preserveGif: false });
     expect(result.mime).toBe('image/jpeg');
+  },
+);
+
+it.each(['photo.tiff', 'photo.dng', 'photo.jpg', 'drawing.svg'])(
+  'does not pass generic-MIME %s through when its image header is missing',
+  async (filename) => {
+    strip.mockRejectedValue(new Error('Cannot decode image'));
+    await expect(
+      prepareFileAttachment('file:///opaque', 'R1BT', 'application/octet-stream', filename),
+    ).rejects.toThrow('Cannot decode image');
+    expect(strip).toHaveBeenCalledWith('file:///opaque', 'R1BT', { preserveGif: false });
   },
 );

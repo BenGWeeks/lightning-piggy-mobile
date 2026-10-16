@@ -1,5 +1,9 @@
 import { Buffer } from 'buffer';
-import { detectImageMime, stripImageMetadataBytes } from '../utils/imageMetadataStrip';
+import {
+  detectImageMime,
+  hasImageFilename,
+  stripImageMetadataBytes,
+} from '../utils/imageMetadataStrip';
 import { stripImageMetadata } from './imageUploadService';
 
 /** File attachments preserve non-image bytes; image failures must re-encode or abort. */
@@ -10,7 +14,15 @@ export async function prepareFileAttachment(
   filename: string,
 ): Promise<{ uri: string; base64: string; mime: string; filename: string }> {
   // Decode only a bounded header before the non-image passthrough gate.
-  mime = detectImageMime(Buffer.from(base64.slice(0, 24), 'base64')) ?? mime;
+  const detected = detectImageMime(Buffer.from(base64.slice(0, 24), 'base64'));
+  const declared = mime.toLowerCase().split(';')[0].trim();
+  const generic = [
+    '',
+    'application/octet-stream',
+    'binary/octet-stream',
+    'application/binary',
+  ].includes(declared);
+  mime = detected ?? (generic && hasImageFilename(filename) ? 'image/unknown' : mime);
   if (!mime.toLowerCase().startsWith('image/')) return { uri, base64, mime, filename };
   try {
     const bytes = stripImageMetadataBytes(Buffer.from(base64, 'base64'), mime);

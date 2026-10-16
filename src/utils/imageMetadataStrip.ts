@@ -195,12 +195,20 @@ export function stripWebpMetadata(bytes: Uint8Array): Uint8Array {
   return result;
 }
 
+/** Generic document providers may also omit an image's signature or MIME. */
+export function hasImageFilename(filename: string): boolean {
+  return /\.(?:jpe?g|jpe|jfif|png|webp|heics?|heifs?|hif|avif|gif|tiff?|bmp|ico|jp2|jxl|psd|dng|cr[23]|nef|nrw|arw|raf|orf|rw2|pef|srw|svg)$/i.test(
+    filename,
+  );
+}
+
 /** Recognize photo signatures even when a document provider returns generic MIME. */
 export function detectImageMime(bytes: Uint8Array): string | undefined {
   if (bytes[0] === 0xff && bytes[1] === 0xd8) return 'image/jpeg';
   if (text(bytes, 0, 8) === '\x89PNG\r\n\x1a\n') return 'image/png';
   if (text(bytes, 0, 4) === 'RIFF' && text(bytes, 8, 4) === 'WEBP') return 'image/webp';
   if (['GIF87a', 'GIF89a'].includes(text(bytes, 0, 6))) return 'image/gif';
+  if (['II*\0', 'MM\0*', 'II+\0', 'MM\0+'].includes(text(bytes, 0, 4))) return 'image/tiff';
   if (text(bytes, 4, 4) === 'ftyp') {
     const brand = text(bytes, 8, 4);
     if (
