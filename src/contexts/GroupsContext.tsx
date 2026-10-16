@@ -1,3 +1,4 @@
+import { enabledAppRelays } from '../services/appRelayPrefs';
 import { groupDisplay } from '../utils/groupDisplay';
 import { useAccountState } from './useAccountState';
 import React, {
@@ -827,7 +828,9 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   useEffect(() => {
     if (!isLoggedIn || !pubkey) return;
     const readRelays = relays.filter((r) => r.read).map((r) => r.url);
-    const targetRelays = Array.from(new Set([...readRelays, ...DEFAULT_RELAYS]));
+    const targetRelays = Array.from(
+      new Set([...readRelays, ...enabledAppRelays('default', DEFAULT_RELAYS)]),
+    );
     let active = true;
     const unsubscribe = subscribeGroupStateForViewer({
       viewerPubkey: pubkey,

@@ -1,3 +1,4 @@
+import { APP_RELAY_PREFS_KEY, forgetAppRelayPrefs } from '../services/appRelayPrefs';
 import { wipeCheckoutAddress } from '../services/checkoutAddressStorage';
 import { cancelSellerActivity } from '../services/sellerActivityService';
 import { drainSellerReceiveWalletWrites } from '../services/sellerReceiveWallet';
@@ -123,7 +124,9 @@ export async function wipeAccountCaches(loggedOutPubkey: string | null): Promise
     walletIds.flatMap((id) => [deleteNwcUrl(id), deleteXpub(id), deleteMnemonic(id)]),
   );
 
+  await forgetAppRelayPrefs(loggedOutPubkey);
   const toRemove: string[] = [
+    perAccountKey(APP_RELAY_PREFS_KEY, loggedOutPubkey),
     perAccountKey('seller_activity_enabled_v1', loggedOutPubkey),
     perAccountKey('seller_activity_cursor_v1', loggedOutPubkey),
     // Per-account namespaced caches (#288 storage refactor)

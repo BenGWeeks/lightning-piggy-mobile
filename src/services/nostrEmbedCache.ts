@@ -1,7 +1,8 @@
 // Resolves events referenced from note / bio content (NIP-27 `nostr:note…`,
 // `nevent…`, `naddr…`) for the embedded cards in `components/nostr`.
 //
-// - Batched: refs requested within BATCH_MS share one relay query per shape
+// - Batched: refs requested within BATCH_MS with the same read-relay plan
+//   share one relay query per shape
 //   (one `ids` filter for events, one `#d` filter per kind+author for
 //   addresses), so a feed page full of quotes costs a couple of REQs, not one
 //   per card.
@@ -56,6 +57,8 @@ interface Entry {
 const cache = new Map<string, Entry>();
 interface Pending {
   ref: EmbedRef;
+  readRelays: string[];
+  relayPlan: string;
   resolve: (r: EmbedResult) => void;
   promise: Promise<EmbedResult>;
   consumers: Set<symbol>;
@@ -65,9 +68,10 @@ interface Pending {
 const queue = new Map<string, Pending>();
 const inFlight = new Map<string, Pending>();
 let timer: ReturnType<typeof setTimeout> | null = null;
-let batchRelays: string[] = [];
 
 function remember(key: string, result: EmbedResult): void {
+  // A miss from another relay plan must not erase a fresh verified result.
+  if (!result.event && peekEmbed(key)?.event) return;
   cache.delete(key);
   cache.set(key, { result, at: Date.now() });
   while (cache.size > MAX_CACHE) {
@@ -99,18 +103,19 @@ export function resolveEmbed(
   ref: EmbedRef,
   readRelays: readonly string[],
   signal?: AbortSignal,
+  retryMissing = false,
 ): Promise<EmbedResult> {
   if (signal?.aborted) return Promise.resolve({ event: null });
-  const key = embedKey(ref);
-  const cached = peekEmbed(key);
-  if (cached) return Promise.resolve(cached);
+  const relayPlan = JSON.stringify(readRelays);
+  const key = JSON.stringify([embedKey(ref), relayPlan]);
+  const cached = peekEmbed(embedKey(ref));
+  if (cached && (cached.event || !retryMissing)) return Promise.resolve(cached);
   let item = inFlight.get(key) ?? queue.get(key);
   if (!item) {
     let resolve!: (r: EmbedResult) => void;
     const promise = new Promise<EmbedResult>((r) => (resolve = r));
-    item = { ref, resolve, promise, consumers: new Set() };
+    item = { ref, readRelays: [...readRelays], relayPlan, resolve, promise, consumers: new Set() };
     queue.set(key, item);
-    if (readRelays.length > 0) batchRelays = [...readRelays];
     if (!timer) timer = setTimeout(flush, BATCH_MS);
   }
   const pending = item;
@@ -141,8 +146,8 @@ export function resolveEmbed(
   });
 }
 
-function relaysFor(refs: EmbedRef[]): string[] {
-  const read = batchRelays.slice(0, MAX_READ_RELAYS);
+function relaysFor(refs: EmbedRef[], readRelays: readonly string[]): string[] {
+  const read = readRelays.slice(0, MAX_READ_RELAYS);
   const hints: string[] = [];
   for (const ref of refs) {
     for (const r of ref.relays.slice(0, 2)) {
@@ -161,30 +166,41 @@ const newer = (a: Event, b: Event | undefined) =>
 async function flush(): Promise<void> {
   timer = null;
   const batch = [...queue.entries()].slice(0, MAX_BATCH);
+  for (const [key] of batch) queue.delete(key);
+  if (queue.size > 0) timer = setTimeout(flush, BATCH_MS);
+  const groups = new Map<string, typeof batch>();
+  for (const entry of batch) {
+    const plan = entry[1].relayPlan;
+    const group = groups.get(plan) ?? [];
+    group.push(entry);
+    groups.set(plan, group);
+  }
+  await Promise.all([...groups.values()].map(flushBatch));
+}
+
+async function flushBatch(batch: [string, Pending][]): Promise<void> {
   const controller = new AbortController();
   for (const [key, item] of batch) {
     item.controller = controller;
     item.batch = batch.map(([, entry]) => entry);
-    queue.delete(key);
     inFlight.set(key, item);
   }
-  if (queue.size > 0) timer = setTimeout(flush, BATCH_MS);
   const refs = batch.map(([, p]) => p.ref);
-  const relays = relaysFor(refs);
+  const relays = relaysFor(refs, batch[0][1].readRelays);
   const found = new Map<string, Event>();
   const scheduler = createYieldScheduler({ safetyEvery: 32 });
   const delivered = new Set<string>();
   const deliver = (key: string, item: Pending, result: EmbedResult): void => {
     if (delivered.has(key)) return;
     delivered.add(key);
-    if (!controller.signal.aborted && item.consumers.size) remember(key, result);
+    if (!controller.signal.aborted && item.consumers.size) remember(embedKey(item.ref), result);
     if (inFlight.get(key) === item) inFlight.delete(key);
     item.resolve(result);
   };
   const deliverOrdinary = (matches: (ref: EmbedRef) => boolean): void => {
     for (const [key, item] of batch) {
       if (!matches(item.ref)) continue;
-      const event = found.get(key) ?? null;
+      const event = found.get(embedKey(item.ref)) ?? null;
       if (event?.kind !== PRODUCT_KIND) deliver(key, item, { event });
     }
   };
@@ -258,7 +274,7 @@ async function flush(): Promise<void> {
       products = new Map(listings.map((event) => [event.id, parseMarketListing(event)]));
     }
     for (const [key, item] of batch) {
-      const event = found.get(key) ?? null;
+      const event = found.get(embedKey(item.ref)) ?? null;
       const product = event?.kind === PRODUCT_KIND ? (products.get(event.id) ?? null) : undefined;
       const result: EmbedResult =
         event?.kind === PRODUCT_KIND
@@ -281,5 +297,4 @@ export function __resetEmbedCacheForTests(): void {
   inFlight.clear();
   if (timer) clearTimeout(timer);
   timer = null;
-  batchRelays = [];
 }

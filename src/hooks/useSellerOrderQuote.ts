@@ -1,3 +1,4 @@
+import { useAppRelayPrefs } from './useAppRelayPrefs';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNostr } from '../contexts/NostrContext';
 import {
@@ -23,11 +24,16 @@ import type { ParsedOrderEvent } from '../utils/orderEvents';
 /** Re-query the seller's own events at most this often from order cards. */
 const REFRESH_MS = 5 * 60_000;
 const inFlight = new Map<string, Promise<void>>();
+const fetchedScopes = new Map<string, string>();
+const requestedScopes = new Map<string, string>();
 
 /** Restore the persisted snapshot, then refresh from relays if stale — one
  * request per account however many order cards mount at once. */
-function ensureSellerSnapshot(pubkey: string, relays: string[]): Promise<void> {
-  const pending = inFlight.get(pubkey);
+function ensureSellerSnapshot(pubkey: string, relays: string[], relayScope: string): Promise<void> {
+  const key = JSON.stringify([pubkey, relayScope, relays]);
+  // Record even a deduplicated request: switching A → B → A makes A current again.
+  requestedScopes.set(pubkey, key);
+  const pending = inFlight.get(key);
   if (pending) return pending;
   const run = (async () => {
     const state = sellerStoreState(pubkey);
@@ -36,16 +42,23 @@ function ensureSellerSnapshot(pubkey: string, relays: string[]): Promise<void> {
         loadSellerCache(pubkey),
         loadHiddenListings(pubkey),
       ]);
+      if (requestedScopes.get(pubkey) !== key) return;
       restoreSellerAccount(pubkey, events, hidden);
     }
-    if (Date.now() - sellerStoreState(pubkey).fetchedAt < REFRESH_MS) return;
+    if (
+      fetchedScopes.get(pubkey) === key &&
+      Date.now() - sellerStoreState(pubkey).fetchedAt < REFRESH_MS
+    )
+      return;
     const events = await fetchSellerEvents({ pubkey, relays });
+    if (requestedScopes.get(pubkey) !== key) return;
+    fetchedScopes.set(pubkey, key);
     addSellerEvents(pubkey, events, true);
     await persistSellerSnapshot(pubkey);
   })()
     .catch(() => undefined)
-    .finally(() => inFlight.delete(pubkey));
-  inFlight.set(pubkey, run);
+    .finally(() => inFlight.delete(key));
+  inFlight.set(key, run);
   return run;
 }
 
@@ -66,6 +79,7 @@ export interface UseSellerOrderQuote {
  */
 export function useSellerOrderQuote(order: ParsedOrderEvent | null): UseSellerOrderQuote {
   const { pubkey, relays } = useNostr();
+  const relayScope = useAppRelayPrefs();
   const [version, setVersion] = useState(0);
   const [loading, setLoading] = useState(true);
   const relayKey = useMemo(() => sellerRelays(relays).join(','), [relays]);
@@ -75,13 +89,13 @@ export function useSellerOrderQuote(order: ParsedOrderEvent | null): UseSellerOr
   useEffect(() => {
     if (!active || !pubkey) return;
     let cancelled = false;
-    void ensureSellerSnapshot(pubkey, relayKey.split(',')).then(() => {
+    void ensureSellerSnapshot(pubkey, relayKey.split(','), relayScope).then(() => {
       if (!cancelled) setLoading(false);
     });
     return () => {
       cancelled = true;
     };
-  }, [active, pubkey, relayKey]);
+  }, [active, pubkey, relayKey, relayScope]);
 
   const snapshot = useMemo(() => {
     if (!pubkey) return null;

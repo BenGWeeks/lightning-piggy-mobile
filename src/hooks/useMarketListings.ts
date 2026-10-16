@@ -1,3 +1,4 @@
+import { useAppRelayPrefs } from './useAppRelayPrefs';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import { Toast } from '../components/BrandedToast';
@@ -40,6 +41,7 @@ const OPEN_SCOPE_KEY = '*';
 
 export function useMarketListings(enabled: boolean, scope?: MarketListingsScope) {
   const { pubkey, relays } = useNostr();
+  const relayScope = useAppRelayPrefs();
   const { contacts } = useNostrContacts();
   const t = useTranslation();
   const focused = useIsFocused();
@@ -80,6 +82,7 @@ export function useMarketListings(enabled: boolean, scope?: MarketListingsScope)
     key: string;
     at: number;
     revision: number;
+    relayScope: string;
     result: MarketListingsResult;
   } | null>(null);
   // The last whole catalogue for a scope (never a first page): what the next
@@ -99,6 +102,7 @@ export function useMarketListings(enabled: boolean, scope?: MarketListingsScope)
         last &&
         last.key === key &&
         last.revision === revision &&
+        last.relayScope === relayScope &&
         Date.now() - last.at < MARKET_SNAPSHOT_FRESH_MS
       ) {
         // Show the cached snapshot. State may hold something else: a refetch
@@ -197,7 +201,9 @@ export function useMarketListings(enabled: boolean, scope?: MarketListingsScope)
         setGeneration((value) => value + 1);
         if (!result.incomplete || result.products.length > 0) void writeMarketSnapshot(key, result);
         // Only a complete snapshot is worth reusing; a partial one refetches.
-        lastFetch.current = result.incomplete ? null : { key, at: Date.now(), revision, result };
+        lastFetch.current = result.incomplete
+          ? null
+          : { key, at: Date.now(), revision, relayScope, result };
         return result;
       };
       void load().then((result) => {
@@ -233,7 +239,7 @@ export function useMarketListings(enabled: boolean, scope?: MarketListingsScope)
         if (retryTimer) clearTimeout(retryTimer);
         dismissToast?.();
       };
-    }, [enabled, focused, key, account, authorsKey, relaysKey, revision, t, open]),
+    }, [enabled, focused, key, account, authorsKey, relaysKey, revision, relayScope, t, open]),
   );
   // Legacy filters stored contact labels. Preserve those selections while
   // moving to pubkey keys, even when a petname differs from the shop profile.

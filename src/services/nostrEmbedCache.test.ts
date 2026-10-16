@@ -236,3 +236,66 @@ it('keeps a shared query until its last focused reader leaves, then aborts', asy
   await settle(Promise.all([first, second]));
   expect(peekEmbed(`e:${id('1')}`)).toBeUndefined();
 });
+
+it('retries a cached miss after relay plan changes while retaining positive cache entries', async () => {
+  mockQuery.mockResolvedValue([]);
+  await settle(resolveEmbed(eventRef(id('3')), []));
+  mockQuery.mockResolvedValue([ev({ id: id('3') })]);
+  expect((await resolveEmbed(eventRef(id('3')), ['wss://read'])).event).toBeNull();
+  const recovered = await settle(resolveEmbed(eventRef(id('3')), ['wss://read'], undefined, true));
+  expect(recovered.event?.id).toBe(id('3'));
+  const count = mockQuery.mock.calls.length;
+  await settle(resolveEmbed(eventRef(id('3')), ['wss://other'], undefined, true));
+  expect(mockQuery).toHaveBeenCalledTimes(count);
+});
+
+it('drops previous read relays for uncached and retried embeds when the plan becomes empty', async () => {
+  mockQuery.mockResolvedValue([]);
+  await settle(resolveEmbed(eventRef(id('1')), ['wss://disabled']));
+  mockQuery.mockClear();
+
+  expect(await settle(resolveEmbed(eventRef(id('2')), []))).toEqual({ event: null });
+  expect(await settle(resolveEmbed(eventRef(id('1')), [], undefined, true))).toEqual({
+    event: null,
+  });
+  expect(mockQuery).not.toHaveBeenCalled();
+
+  await settle(resolveEmbed(eventRef(id('3'), ['wss://hint']), []));
+  expect(mockQuery).toHaveBeenCalledTimes(1);
+  expect(mockQuery.mock.calls[0][1]).toEqual(['wss://hint']);
+});
+
+it('routes simultaneous refs by their own relay plans, including an empty plan and hints', async () => {
+  mockQuery.mockImplementation(async (_pool, relays, filter) =>
+    relays.includes('wss://first') ? [ev({ id: filter.ids[0] })] : [],
+  );
+  const first = resolveEmbed(eventRef(id('1')), ['wss://first']);
+  const second = resolveEmbed(eventRef(id('2')), ['wss://second']);
+  const empty = resolveEmbed(eventRef(id('3')), []);
+  const hinted = resolveEmbed(eventRef(id('4'), ['wss://hint']), []);
+  const results = await settle(Promise.all([first, second, empty, hinted]));
+  expect(results.map((r) => r.event?.id ?? null)).toEqual([id('1'), null, null, null]);
+  expect(mockQuery.mock.calls.map((c) => [c[1], c[2].ids])).toEqual([
+    [['wss://first'], [id('1')]],
+    [['wss://second'], [id('2')]],
+    [['wss://hint'], [id('3'), id('4')]],
+  ]);
+});
+
+it('does not deduplicate the same ref across different in-flight relay plans', async () => {
+  let finishFirst!: (events: Event[]) => void;
+  mockQuery.mockImplementation((_pool, relays) =>
+    relays.includes('wss://first')
+      ? new Promise((resolve) => (finishFirst = resolve))
+      : Promise.resolve([ev({ id: id('1') })]),
+  );
+  const first = resolveEmbed(eventRef(id('1')), ['wss://first']);
+  await jest.advanceTimersByTimeAsync(60);
+  const second = resolveEmbed(eventRef(id('1')), ['wss://second']);
+  await jest.advanceTimersByTimeAsync(100);
+  expect(mockQuery).toHaveBeenCalledTimes(2);
+  expect((await second).event?.id).toBe(id('1'));
+  finishFirst([]);
+  await settle(first);
+  expect(peekEmbed(`e:${id('1')}`)?.event?.id).toBe(id('1'));
+});

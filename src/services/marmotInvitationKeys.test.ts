@@ -1,3 +1,7 @@
+import { forgetAppRelayPrefs, setAppRelayEnabled } from './appRelayPrefs';
+import { setCurrentUserPubkey } from './nostrActiveAccount';
+import { DEFAULT_RELAYS } from './nostrRelayDefaults';
+import { MARMOT_KEY_PACKAGE_RELAYS } from './marmotKeyPackageRelays';
 import {
   finalizeEvent,
   generateSecretKey,
@@ -249,4 +253,21 @@ test('reserves inventory slots for well-known relays with an oversized 10051', a
     ]),
   );
   expect(result.partial).toBe(true);
+});
+
+test('hydrates invitation discovery and scan preferences for the owner after a switch', async () => {
+  for (const url of MARMOT_KEY_PACKAGE_RELAYS)
+    await setAppRelayEnabled(owner, 'marmot', url, false);
+  for (const url of DEFAULT_RELAYS) await setAppRelayEnabled(owner, 'default', url, false);
+  await forgetAppRelayPrefs(owner);
+  setCurrentUserPubkey(null);
+  const fetch = jest.fn(async (_relays: string[], _filter: unknown) => [] as NostrEvent[]);
+  await loadInvitationKeys(owner, ['wss://personal.example'], fetch);
+  for (const [targets] of fetch.mock.calls) {
+    expect(targets).toEqual(['wss://personal.example']);
+  }
+  expect(fetch).toHaveBeenCalledTimes(2);
+  for (const url of MARMOT_KEY_PACKAGE_RELAYS) await setAppRelayEnabled(owner, 'marmot', url, true);
+  for (const url of DEFAULT_RELAYS) await setAppRelayEnabled(owner, 'default', url, true);
+  await forgetAppRelayPrefs(owner);
 });

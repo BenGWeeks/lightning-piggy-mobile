@@ -1,3 +1,4 @@
+import { enabledAppRelays } from './appRelayPrefs';
 // Gift-wrap one unsigned NIP-17 rumor to one recipient and publish it, for the
 // signed-in identity's signer (nsec / Amber / NIP-46). Used by Market order
 // flows — the buyer's kind-16 order and the seller's payment request / status
@@ -61,9 +62,17 @@ export function canSendNip17(pubkey: string | null, signerType: string | null | 
 }
 
 /** Write relays ∪ defaults (publish is Promise.any — one responsive relay suffices). */
-export function nip17TargetRelays(relays: Pick<RelayConfig, 'url' | 'write'>[]): string[] {
+export function nip17TargetRelays(
+  relays: Pick<RelayConfig, 'url' | 'write'>[],
+  senderPubkey?: string,
+): string[] {
   const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
-  return Array.from(new Set([...writeRelays, ...nostrService.DEFAULT_RELAYS]));
+  return Array.from(
+    new Set([
+      ...writeRelays,
+      ...enabledAppRelays('default', nostrService.DEFAULT_RELAYS, senderPubkey),
+    ]),
+  );
 }
 
 /**
@@ -82,7 +91,7 @@ export async function sendNip17Rumor(input: SendNip17RumorInput): Promise<DmSend
   if (!/^[0-9a-f]{64}$/.test(recipient)) {
     throw new Nip17SendError('noRecipient', 'Recipient has no valid Nostr pubkey');
   }
-  const targetRelays = nip17TargetRelays(input.relays);
+  const targetRelays = nip17TargetRelays(input.relays, pubkey);
 
   let result: DmSendResult;
   if (signerType === 'nsec') {

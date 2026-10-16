@@ -489,3 +489,25 @@ File cards share image bubble width and margins, display a friendly file type
 and human-readable size, and omit hosting domains and raw MIME declarations.
 Images prefer imeta dimensions, otherwise their loaded source dimensions,
 with aspect ratios clamped to 0.6–1.8.
+
+=== App relay preferences and publishing network lists
+
+Advanced → Nostr network keeps the public NIP-65, NIP-17 and Blossom list
+editors separate from the app's fallback infrastructure. Each list retains its
+protocol label and an information sheet. Publish opens a dismissible progress
+sheet before signing, then shows each destination's acceptance, rejection reason
+or lack of response. Closing the sheet does not cancel the operation; completion
+also reaches a branded toast when the sheet is no longer visible. Result updates
+are coalesced before rendering. Signer refusal and account changes cannot adopt
+another account's list or surface its late result.
+
+App Relays contains switches for defaults, relay-list indexers, geo-cache,
+Marmot key-package discovery and marketplace relays. `appRelayPrefs.ts` stores
+disabled URLs per group and account in AsyncStorage, loads before app fallbacks
+become available, serializes writes, and participates in account cache wiping.
+Every use of these app-provided lists goes through `enabledAppRelays`; a source
+consumer audit test guards new call sites. Explicit personal relay lists retain
+their precedence. Preference changes invalidate the foreground network plan;
+headless DM reads load the same account preferences. Empty groups remain empty
+and show a warning. Test-account lockdown overrides preferences and continues
+to route exclusively through the test relay.

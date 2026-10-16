@@ -1596,7 +1596,7 @@
     "nativeCryptoActiveYes": "本次会话已启用：是",
     "nativeCryptoActiveNo": "本次会话已启用：否",
     "notInUse": "当前未使用",
-    "advancedRelays": "高级",
+    "advancedRelays": "应用中继",
     "defaultRelaysTitle": "应用默认中继",
     "defaultRelaysHint": "内置于应用中，并始终作为你的中继之外的备用。",
     "deviceRelaysTitle": "仅限本设备的中继",
@@ -3657,5 +3657,24 @@
     "sendNewInvoice": "发送新发票",
     "checkWalletFirst": "请先检查你的钱包",
     "unknownInvoiceWarning": "我们无法确认之前的账单是否已支付。如果已支付，请勿发送新账单。"
+  },
+  "relayPublishSheet": {
+    "waiting": "等待签名器…",
+    "title": "正在发布%{title}",
+    "accepted": "已接受",
+    "rejected": "已拒绝",
+    "noResponse": "无响应",
+    "pending": "正在发布…"
+  },
+  "appRelays": {
+    "toggle": "使用 %{host}",
+    "saveFailed": "无法保存中继偏好设置",
+    "warning": {
+      "default": "应用备用连接已关闭",
+      "indexers": "中继列表发现已关闭",
+      "geocache": "地理缓存可能无法加载",
+      "marmot": "群组密钥发现可能无法正常工作",
+      "market": "市场商品将无法加载"
+    }
   }
 }

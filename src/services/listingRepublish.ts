@@ -1,3 +1,4 @@
+import { enabledAppRelays } from './appRelayPrefs';
 import { verifyEvent, type Event } from 'nostr-tools';
 import { lockRelays } from '../config/testRelayLockdown';
 import { MARKET_RELAYS } from '../utils/marketListingsQuery';
@@ -13,19 +14,20 @@ export function listingTargetRelays(
   pubkey: string,
   relays: readonly { url: string; write: boolean }[],
 ): string[] {
-  const urls = [...relays.filter((r) => r.write).map((r) => r.url), ...MARKET_RELAYS].flatMap(
-    (url) => {
-      try {
-        const parsed = new URL(url.trim());
-        if (parsed.protocol !== 'ws:' && parsed.protocol !== 'wss:') return [];
-        // URL normalizes the host; paths and query values remain case-sensitive.
-        // Only remove a root slash, never a path or query's trailing slash.
-        return [parsed.toString().replace(/^(wss?:\/\/[^/?#]+)\/(?=[?#]|$)/, '$1')];
-      } catch {
-        return [];
-      }
-    },
-  );
+  const urls = [
+    ...relays.filter((r) => r.write).map((r) => r.url),
+    ...enabledAppRelays('market', MARKET_RELAYS, pubkey),
+  ].flatMap((url) => {
+    try {
+      const parsed = new URL(url.trim());
+      if (parsed.protocol !== 'ws:' && parsed.protocol !== 'wss:') return [];
+      // URL normalizes the host; paths and query values remain case-sensitive.
+      // Only remove a root slash, never a path or query's trailing slash.
+      return [parsed.toString().replace(/^(wss?:\/\/[^/?#]+)\/(?=[?#]|$)/, '$1')];
+    } catch {
+      return [];
+    }
+  });
   return [...new Set(lockRelays(urls, pubkey))];
 }
 

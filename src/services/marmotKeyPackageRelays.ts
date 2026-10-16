@@ -1,3 +1,4 @@
+import { enabledAppRelays } from './appRelayPrefs';
 // MIP-00 kind-10051 discovery and bounded key-package relay selection.
 import type { EventTemplate } from 'nostr-tools';
 
@@ -28,8 +29,11 @@ export function cleanKeyPackageRelays(urls: readonly string[], max = MAX_KEY_PAC
 export function keyPackagePublishRelays(owner: string, own: string[]): string[] {
   if (isTestRelayLockdown(owner)) return [TEST_RELAY_URL];
   return cleanKeyPackageRelays([
-    ...cleanKeyPackageRelays(own, MAX_KEY_PACKAGE_RELAYS - MARMOT_KEY_PACKAGE_RELAYS.length),
-    ...MARMOT_KEY_PACKAGE_RELAYS,
+    ...cleanKeyPackageRelays(
+      own,
+      MAX_KEY_PACKAGE_RELAYS - enabledAppRelays('marmot', MARMOT_KEY_PACKAGE_RELAYS, owner).length,
+    ),
+    ...enabledAppRelays('marmot', MARMOT_KEY_PACKAGE_RELAYS, owner),
   ]);
 }
 

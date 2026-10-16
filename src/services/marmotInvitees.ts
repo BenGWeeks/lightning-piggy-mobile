@@ -1,3 +1,4 @@
+import { enabledAppRelays } from './appRelayPrefs';
 // Which of a contact's devices to invite into a Marmot group, and the ONE
 // Add commit that brings every one of them in.
 //
@@ -84,8 +85,8 @@ export async function fetchKeyPackageEvents(
   const author = peer.toLowerCase();
   const lookup = cleanKeyPackageRelays([
     ...cleanKeyPackageRelays(lookupRelays, 6),
-    ...MARMOT_KEY_PACKAGE_RELAYS,
-    ...RELAY_LIST_INDEXERS,
+    ...enabledAppRelays('marmot', MARMOT_KEY_PACKAGE_RELAYS),
+    ...enabledAppRelays('indexers', RELAY_LIST_INDEXERS),
   ]);
   const lists = (await network.request(lookup, [
     { kinds: [10051], authors: [author], limit: 1 },
@@ -107,10 +108,10 @@ export async function fetchKeyPackageEvents(
               .map((r) => r.url),
           )
         : []),
-      ...MARMOT_KEY_PACKAGE_RELAYS,
+      ...enabledAppRelays('marmot', MARMOT_KEY_PACKAGE_RELAYS),
       ...lookupRelays,
     ],
-    2 * MAX_KEY_PACKAGE_RELAYS + MARMOT_KEY_PACKAGE_RELAYS.length,
+    2 * MAX_KEY_PACKAGE_RELAYS + enabledAppRelays('marmot', MARMOT_KEY_PACKAGE_RELAYS).length,
   );
   return (await network.request(targets, {
     kinds: [KEY_PACKAGE_KIND],

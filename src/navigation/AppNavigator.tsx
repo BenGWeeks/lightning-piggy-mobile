@@ -1,3 +1,4 @@
+import { enabledAppRelays } from '../services/appRelayPrefs';
 import { useSellerActivityChecks } from '../hooks/useSellerActivityChecks';
 import { resolveActivityListing } from '../services/sellerActivityService';
 import { getCurrentUserReadRelays } from '../services/nostrActiveAccount';
@@ -328,7 +329,7 @@ export const navigateFromNotification = (
     const controller = new AbortController();
     void resolveActivityListing(
       data.listingCoord,
-      urls.length ? urls : DEFAULT_RELAYS,
+      urls.length ? urls : enabledAppRelays('default', DEFAULT_RELAYS),
       controller.signal,
     )
       .then((product) => {

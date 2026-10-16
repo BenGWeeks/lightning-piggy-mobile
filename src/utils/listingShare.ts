@@ -1,3 +1,4 @@
+import { enabledAppRelays } from '../services/appRelayPrefs';
 // Sharing a Market listing (#1541) — pure helpers, no I/O.
 //
 // Both share paths carry the listing as a NIP-21 `nostr:naddr1…` reference
@@ -28,7 +29,7 @@ export function listingNaddr(event: Pick<Event, 'kind' | 'pubkey' | 'tags'>): st
       kind: event.kind,
       pubkey: event.pubkey,
       identifier,
-      relays: MARKET_RELAYS,
+      relays: enabledAppRelays('market', MARKET_RELAYS),
     });
   } catch {
     // An identifier over 255 bytes can't be TLV-encoded.

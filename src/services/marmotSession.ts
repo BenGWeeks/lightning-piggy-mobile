@@ -422,6 +422,7 @@ export class MarmotSession {
     this.listeners.clear();
   }
 
+  refreshRelaySubscriptions = () => this.connection.reconnect();
   subscribe(listener: MarmotSessionListener): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);

@@ -1,3 +1,5 @@
+import { setCurrentUserPubkey } from './nostrActiveAccount';
+import { forgetAppRelayPrefs, loadAppRelayPrefs, setAppRelayEnabled } from './appRelayPrefs';
 import { TEST_ACCOUNT_KEYS } from '../utils/testAccounts';
 import { TEST_RELAY_URL } from '../config/testRelayLockdown';
 import { MARKET_RELAYS } from '../utils/marketListingsQuery';
@@ -212,6 +214,36 @@ describe('seller relay quorum with supplemental marketplace reads', () => {
       'No seller write relay answered',
     );
   });
+
+  it.each(['snapshot', 'revision'])(
+    'filters disabled app defaults and marketplace relays for a %s, retaining explicit write choices',
+    async (read) => {
+      setCurrentUserPubkey(pubkey);
+      await forgetAppRelayPrefs(pubkey);
+      await loadAppRelayPrefs(pubkey);
+      try {
+        await setAppRelayEnabled(pubkey, 'default', 'wss://default.example', false);
+        await setAppRelayEnabled(pubkey, 'market', MARKET_RELAYS[0], false);
+        (querySyncAbortable as jest.Mock).mockResolvedValue([]);
+        const fetch = (relays: string[]) =>
+          read === 'snapshot'
+            ? fetchSellerEvents({ pubkey, relays })
+            : fetchLatestRevision({ pubkey, kind: 30402, dTag: 'saved', relays });
+        await expect(fetch([])).rejects.toThrow('No seller write relay answered');
+        let targets = (querySyncAbortable as jest.Mock).mock.calls.map((call) => call[1][0]);
+        expect(targets).not.toContain('wss://default.example');
+        expect(targets).not.toContain(MARKET_RELAYS[0]);
+        jest.clearAllMocks();
+        await fetch(['wss://default.example']);
+        targets = (querySyncAbortable as jest.Mock).mock.calls.map((call) => call[1][0]);
+        expect(targets).toContain('wss://default.example');
+        expect(targets).not.toContain(MARKET_RELAYS[0]);
+      } finally {
+        setCurrentUserPubkey(null);
+        await forgetAppRelayPrefs(pubkey);
+      }
+    },
+  );
 
   it('uses default seller relays when none are configured', async () => {
     (querySyncAbortable as jest.Mock).mockImplementation((_pool, relays) =>

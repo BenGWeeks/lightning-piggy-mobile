@@ -1596,7 +1596,7 @@
     "nativeCryptoActiveYes": "Active this session: yes",
     "nativeCryptoActiveNo": "Active this session: no",
     "notInUse": "Not in use right now",
-    "advancedRelays": "Advanced",
+    "advancedRelays": "App Relays",
     "defaultRelaysTitle": "App default relays",
     "defaultRelaysHint": "Built into the app and always used as a fallback alongside your relays.",
     "deviceRelaysTitle": "Device-only relays",
@@ -3657,5 +3657,24 @@
     "sendNewInvoice": "Send new invoice",
     "checkWalletFirst": "Check your wallet first",
     "unknownInvoiceWarning": "We couldn't confirm whether the earlier invoice was paid. If it was, don't send a new one."
+  },
+  "relayPublishSheet": {
+    "waiting": "Waiting for signer…",
+    "title": "Publishing %{title}",
+    "accepted": "Accepted",
+    "rejected": "Rejected",
+    "noResponse": "No response",
+    "pending": "Publishing…"
+  },
+  "appRelays": {
+    "toggle": "Use %{host}",
+    "saveFailed": "Could not save relay preference",
+    "warning": {
+      "default": "App fallback connections are off",
+      "indexers": "Relay list discovery is off",
+      "geocache": "Geo-caches may not load",
+      "marmot": "Group key discovery may not work",
+      "market": "Market listings won’t load"
+    }
   }
 }

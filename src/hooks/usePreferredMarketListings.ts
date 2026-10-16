@@ -1,3 +1,4 @@
+import { useAppRelayPrefs } from './useAppRelayPrefs';
 import { useCallback, useMemo, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import { Toast } from '../components/BrandedToast';
@@ -15,6 +16,7 @@ import { useMarketListings } from './useMarketListings';
 
 export function usePreferredMarketListings(enabled = true) {
   const { relays } = useNostr();
+  const relayScope = useAppRelayPrefs();
   const t = useTranslation();
   const [authors, setAuthors] = useState<readonly string[] | undefined>(
     () => getPreferredSellers()?.authors,
@@ -66,7 +68,8 @@ export function usePreferredMarketListings(enabled = true) {
         if (retryTimer) clearTimeout(retryTimer);
         dismissToast?.();
       };
-    }, [enabled, relaysKey, revision, t]),
+      // eslint-disable-next-line react-hooks/exhaustive-deps -- App relay defaults are read inside the service.
+    }, [enabled, relaysKey, revision, relayScope, t]),
   );
   const scope = useMemo(
     () => ({ account: PREFERRED_SELLERS_ACCOUNT, authors: preferredMarketScope(authors ?? []) }),

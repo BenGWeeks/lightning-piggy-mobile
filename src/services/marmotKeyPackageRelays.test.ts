@@ -1,3 +1,4 @@
+import { loadAppRelayPrefs } from './appRelayPrefs';
 import { TEST_ACCOUNT_PUBKEYS, TEST_RELAY_URL } from '../config/testRelayLockdown';
 import {
   buildKeyPackageRelayList,
@@ -9,6 +10,9 @@ import {
 } from './marmotKeyPackageRelays';
 
 const owner = 'a'.repeat(64);
+beforeEach(async () => {
+  await loadAppRelayPrefs(owner);
+});
 it('keeps own relays and every well-known relay, normalised and deduplicated', () => {
   expect(keyPackagePublishRelays(owner, ['wss://OWN.example/', 'wss://relay.primal.net/'])).toEqual(
     ['wss://own.example', 'wss://relay.primal.net', ...MARMOT_KEY_PACKAGE_RELAYS.slice(0, 2)],

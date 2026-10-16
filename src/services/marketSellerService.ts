@@ -1,3 +1,4 @@
+import { enabledAppRelays } from './appRelayPrefs';
 // Relay I/O for the seller side of the Market (#1273): fetch the user's own
 // Gamma Markets events and publish newly signed ones. Thin shell over the
 // pure builders/reducer in utils/marketSeller*.
@@ -35,13 +36,19 @@ const SELLER_KINDS = [LISTING_KIND, COLLECTION_KIND, SHIPPING_OPTION_KIND, DELET
 // Reads include every publication target and displaced write relay. Only
 // publishing caps the full set; reads query it in bounded batches instead.
 function sellerEventRelays(relays: readonly string[], pubkey?: string): string[] {
-  return lockRelays([...new Set([...MARKET_RELAYS, ...relays])], pubkey);
+  return lockRelays(
+    [...new Set([...enabledAppRelays('market', MARKET_RELAYS), ...relays])],
+    pubkey,
+  );
 }
 
 /** Keep the user's write relays distinct for pre-publish revision checks. */
 export function sellerRelays(relays: readonly { url: string; write: boolean; read: boolean }[]) {
   const write = relays.filter((r) => r.write && /^wss:\/\//.test(r.url)).map((r) => r.url);
-  return [...new Set(write.length > 0 ? write : DEFAULT_RELAYS)].slice(0, MAX_RELAYS);
+  return [...new Set(write.length > 0 ? write : enabledAppRelays('default', DEFAULT_RELAYS))].slice(
+    0,
+    MAX_RELAYS,
+  );
 }
 
 /**
@@ -184,7 +191,10 @@ export async function fetchSellerEvents(input: {
   signal?: AbortSignal;
 }): Promise<Event[]> {
   const pubkey = input.pubkey.toLowerCase();
-  const writeRelays = lockRelays(input.relays.length ? input.relays : DEFAULT_RELAYS, pubkey);
+  const writeRelays = lockRelays(
+    input.relays.length ? input.relays : enabledAppRelays('default', DEFAULT_RELAYS),
+    pubkey,
+  );
   const relays = sellerEventRelays(writeRelays, pubkey);
   trackRelays(relays);
   const batches = await Promise.all([
@@ -231,7 +241,10 @@ export async function fetchLatestRevision(input: {
   relays: string[];
 }): Promise<RevisionResult> {
   const pubkey = input.pubkey.toLowerCase();
-  const writeRelays = lockRelays(input.relays.length ? input.relays : DEFAULT_RELAYS, pubkey);
+  const writeRelays = lockRelays(
+    input.relays.length ? input.relays : enabledAppRelays('default', DEFAULT_RELAYS),
+    pubkey,
+  );
   const relays = sellerEventRelays(writeRelays, pubkey);
   trackRelays(relays);
   // Marketplace replies supplement the write-relay quorum in every batch;
