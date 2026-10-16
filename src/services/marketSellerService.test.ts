@@ -156,8 +156,70 @@ describe('fetchSellerEvents', () => {
       new Error('Relay query timed out before EOSE'),
     );
     await expect(fetchSellerEvents({ pubkey, relays: ['wss://r.example'] })).rejects.toThrow(
-      'Only 0 of 5 relays answered',
+      'No seller write relay answered',
     );
+  });
+});
+
+describe('seller relay quorum with supplemental marketplace reads', () => {
+  const writeRelays = ['wss://write.example'];
+
+  it.each(['snapshot', 'revision'])(
+    'returns seller events for a %s when every marketplace relay times out',
+    async (read) => {
+      const saved = listing('saved');
+      (querySyncAbortable as jest.Mock).mockImplementation((_pool, relays, filter) =>
+        MARKET_RELAYS.includes(relays[0])
+          ? Promise.reject(new Error('Relay query timed out before EOSE'))
+          : Promise.resolve(filter.kinds.includes(saved.kind) ? [saved] : []),
+      );
+      if (read === 'snapshot') {
+        await expect(fetchSellerEvents({ pubkey, relays: writeRelays })).resolves.toEqual([saved]);
+      } else {
+        await expect(
+          fetchLatestRevision({ pubkey, kind: saved.kind, dTag: 'saved', relays: writeRelays }),
+        ).resolves.toMatchObject({ event: saved });
+        expect((querySyncAbortable as jest.Mock).mock.calls.some((c) => c[2]['#a'])).toBe(true);
+        expect((querySyncAbortable as jest.Mock).mock.calls.some((c) => c[2]['#e'])).toBe(true);
+      }
+    },
+  );
+
+  it.each(['snapshot', 'revision'])(
+    'rejects a %s when marketplace replies cannot make up the seller quorum',
+    async (read) => {
+      const sellers = Array.from({ length: 3 }, (_, i) => `wss://seller${i}.example`);
+      (querySyncAbortable as jest.Mock).mockImplementation((_pool, relays) =>
+        sellers.slice(1).includes(relays[0])
+          ? Promise.reject(new Error('Relay query timed out before EOSE'))
+          : Promise.resolve([]),
+      );
+      const pending =
+        read === 'snapshot'
+          ? fetchSellerEvents({ pubkey, relays: sellers })
+          : fetchLatestRevision({ pubkey, kind: 30402, dTag: 'saved', relays: sellers });
+      await expect(pending).rejects.toThrow('Only 1 of 3 relays answered');
+    },
+  );
+
+  it('rejects a snapshot when only marketplace relays answer', async () => {
+    (querySyncAbortable as jest.Mock).mockImplementation((_pool, relays) =>
+      writeRelays.includes(relays[0])
+        ? Promise.reject(new Error('Relay query timed out before EOSE'))
+        : Promise.resolve([]),
+    );
+    await expect(fetchSellerEvents({ pubkey, relays: writeRelays })).rejects.toThrow(
+      'No seller write relay answered',
+    );
+  });
+
+  it('uses default seller relays when none are configured', async () => {
+    (querySyncAbortable as jest.Mock).mockImplementation((_pool, relays) =>
+      relays[0] === 'wss://default.example'
+        ? Promise.resolve([])
+        : Promise.reject(new Error('Relay query timed out before EOSE')),
+    );
+    await expect(fetchSellerEvents({ pubkey, relays: [] })).resolves.toEqual([]);
   });
 });
 
@@ -348,7 +410,7 @@ describe('displaced seller write relays', () => {
               baseId: 'cached-id',
               relays: writeRelays,
             });
-      await expect(pending).rejects.toThrow('Only 0 of 4 relays answered');
+      await expect(pending).rejects.toThrow('No seller write relay answered');
     },
   );
 });

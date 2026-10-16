@@ -99,7 +99,7 @@ export async function verifiedOwnEvents(
  * and rejects: an empty answer from one fast relay must not read as "no
  * shop", while one dead relay in the user's list mustn't block everything.
  * Returns the union of the relays that completed. When requiredRelays is
- * supplied, at least one of those relays must also complete with EOSE.
+ * supplied, only that subset determines the quorum and must answer.
  */
 export async function queryQuorum(
   relays: readonly string[],
@@ -125,17 +125,24 @@ export async function queryQuorum(
     const answered = results.filter(
       (r): r is PromiseFulfilledResult<Event[]> => r.status === 'fulfilled',
     );
-    const quorum = Math.max(1, Math.ceil(unique.length / 2));
-    if (signal?.aborted || answered.length < quorum) {
+    const quorumRelays = requiredRelays
+      ? unique.filter((relay) => requiredRelays.includes(relay))
+      : unique;
+    const answeredForQuorum = requiredRelays
+      ? results.filter(
+          (result, index) =>
+            result.status === 'fulfilled' && requiredRelays.includes(unique[index]),
+        ).length
+      : answered.length;
+    const quorum = Math.max(1, Math.ceil(quorumRelays.length / 2));
+    if (signal?.aborted) {
       throw new Error(`Only ${answered.length} of ${unique.length} relays answered`);
     }
-    if (
-      requiredRelays &&
-      !results.some(
-        (result, index) => result.status === 'fulfilled' && requiredRelays.includes(unique[index]),
-      )
-    ) {
+    if (requiredRelays && answeredForQuorum === 0) {
       throw new Error('No seller write relay answered');
+    }
+    if (answeredForQuorum < quorum) {
+      throw new Error(`Only ${answeredForQuorum} of ${quorumRelays.length} relays answered`);
     }
     return answered.flatMap((r) => r.value);
   } finally {
@@ -177,18 +184,21 @@ export async function fetchSellerEvents(input: {
   signal?: AbortSignal;
 }): Promise<Event[]> {
   const pubkey = input.pubkey.toLowerCase();
-  const relays = sellerEventRelays(input.relays, pubkey);
+  const writeRelays = lockRelays(input.relays.length ? input.relays : DEFAULT_RELAYS, pubkey);
+  const relays = sellerEventRelays(writeRelays, pubkey);
   trackRelays(relays);
   const batches = await Promise.all([
     querySellerBatches(
       relays,
       { kinds: [COLLECTION_KIND, SHIPPING_OPTION_KIND], authors: [pubkey], limit: 100 },
       input.signal,
+      writeRelays,
     ),
     querySellerBatches(
       relays,
       { kinds: [LISTING_KIND], authors: [pubkey], limit: 300 },
       input.signal,
+      writeRelays,
     ),
     querySellerBatches(
       relays,
@@ -199,6 +209,7 @@ export async function fetchSellerEvents(input: {
         limit: 200,
       },
       input.signal,
+      writeRelays,
     ),
   ]);
   return verifiedOwnEvents(batches.flat(), pubkey, SELLER_KINDS, input.signal);
@@ -209,7 +220,7 @@ export async function fetchSellerEvents(input: {
  * null when relays completed with none. Used right before publishing so an
  * edit never silently overwrites a newer revision made elsewhere (and a
  * first-time shop never replaces a shop a slow relay hadn't returned).
- * Fails closed unless at least one seller write relay completes every query;
+ * Fails closed unless a seller write-relay quorum completes every batch;
  * marketplace replies supplement those results but cannot replace them.
  */
 export async function fetchLatestRevision(input: {
@@ -223,8 +234,8 @@ export async function fetchLatestRevision(input: {
   const writeRelays = lockRelays(input.relays.length ? input.relays : DEFAULT_RELAYS, pubkey);
   const relays = sellerEventRelays(writeRelays, pubkey);
   trackRelays(relays);
-  // Preserve write-relay provenance even when marketplace replies alone
-  // meet the overall quorum (or health filtering parks every write relay).
+  // Marketplace replies supplement the write-relay quorum in every batch;
+  // they cannot replace it (even when health filtering parks write relays).
   const queryRevision = (filter: Filter) =>
     querySellerBatches(relays, filter, undefined, writeRelays);
   const coordinate = `${input.kind}:${pubkey}:${input.dTag}`;
