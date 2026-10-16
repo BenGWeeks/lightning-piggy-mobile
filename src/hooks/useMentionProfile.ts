@@ -1,3 +1,4 @@
+import { useAppRelayPrefs } from './useAppRelayPrefs';
 import { enabledAppRelays } from '../services/appRelayPrefs';
 import { useCallback, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
@@ -8,6 +9,7 @@ import { peekMentionProfile, subscribeMentionProfile } from '../services/nostrMe
 /** Display-only lookup, shared across all mentions on focused screens. */
 export function useMentionProfile(pubkey: string) {
   const { relays } = useNostr();
+  const relayScope = useAppRelayPrefs();
   const relayKey = relays
     .filter((r) => r.read)
     .map((r) => r.url)
@@ -22,7 +24,8 @@ export function useMentionProfile(pubkey: string) {
         relayKey ? relayKey.split('|') : enabledAppRelays('default', DEFAULT_RELAYS),
         (profile) => setState({ pubkey, profile }),
       );
-    }, [pubkey, relayKey]),
+      // eslint-disable-next-line react-hooks/exhaustive-deps -- App relay defaults are read inside the service.
+    }, [pubkey, relayKey, relayScope]),
   );
   return state.pubkey === pubkey ? state.profile : peekMentionProfile(pubkey);
 }

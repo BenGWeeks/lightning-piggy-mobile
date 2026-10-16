@@ -99,11 +99,12 @@ export function resolveEmbed(
   ref: EmbedRef,
   readRelays: readonly string[],
   signal?: AbortSignal,
+  retryMissing = false,
 ): Promise<EmbedResult> {
   if (signal?.aborted) return Promise.resolve({ event: null });
   const key = embedKey(ref);
   const cached = peekEmbed(key);
-  if (cached) return Promise.resolve(cached);
+  if (cached && (cached.event || !retryMissing)) return Promise.resolve(cached);
   let item = inFlight.get(key) ?? queue.get(key);
   if (!item) {
     let resolve!: (r: EmbedResult) => void;

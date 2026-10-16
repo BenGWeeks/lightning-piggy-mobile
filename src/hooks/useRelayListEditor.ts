@@ -1,3 +1,4 @@
+import { useAppRelayPrefs } from './useAppRelayPrefs';
 import type { PublishProgress } from '../utils/relayPublishProgress';
 import { lockRelays } from '../config/testRelayLockdown';
 import { enabledAppRelays } from '../services/appRelayPrefs';
@@ -46,6 +47,7 @@ export type RelayListPublishOutcome =
  * publish is in flight (so no edit is lost when the result is adopted).
  */
 export function useRelayListEditor() {
+  const relayScope = useAppRelayPrefs();
   const {
     pubkey,
     relays,
@@ -89,6 +91,8 @@ export function useRelayListEditor() {
     if (!nip65Dirty) setNip65Draft(mergeRelayRows(nip65Relays));
   }, [nip65Relays, nip65Dirty]);
 
+  const dirtyRef = useRef({ nip65: nip65Dirty, inbox: inboxDirty });
+  dirtyRef.current = { nip65: nip65Dirty, inbox: inboxDirty };
   const relayUrls = useMemo(() => relays.map((r) => r.url), [relays]);
   useEffect(() => {
     // Per identity: drop any draft from the previous account, so one
@@ -99,6 +103,10 @@ export function useRelayListEditor() {
     setInboxDraft([]);
     setInboxBaseline([]);
     latestCreatedAtRef.current = {};
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Only identity changes discard drafts.
+  }, [pubkey]);
+
+  useEffect(() => {
     if (!pubkey) return;
     let cancelled = false;
     const sources = [
@@ -154,7 +162,7 @@ export function useRelayListEditor() {
         );
         const list = inboxAdopt?.adopted && found ? found : knownInboxRef.current;
         setInboxBaseline(list);
-        setInboxDraft(list);
+        if (!dirtyRef.current.inbox) setInboxDraft(list);
         setInboxLoading(false);
       } catch (e) {
         // A lookup or local adoption failed; editing still proceeds from the
@@ -165,7 +173,7 @@ export function useRelayListEditor() {
           // user's real inbox relays): start from the known one, and from the
           // stored baselines so the next publish still supersedes them.
           setInboxBaseline(knownInboxRef.current);
-          setInboxDraft(knownInboxRef.current);
+          if (!dirtyRef.current.inbox) setInboxDraft(knownInboxRef.current);
           for (const kind of [10002, 10050] as const) {
             const stored = await readAdoptedCreatedAt(pubkey, kind);
             latestCreatedAtRef.current[kind] = Math.max(
@@ -186,9 +194,9 @@ export function useRelayListEditor() {
     return () => {
       cancelled = true;
     };
-    // Load once per identity; relay-set churn shouldn't reload mid-edit.
+    // Preference hydration/edits retry discovery; keep unsaved drafts intact.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pubkey]);
+  }, [pubkey, relayScope]);
 
   // Keep an untouched inbox draft in step with the provider's known list —
   // only when that list CHANGES (not when loading finishes, which would

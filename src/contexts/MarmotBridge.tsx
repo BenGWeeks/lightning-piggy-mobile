@@ -1,3 +1,4 @@
+import { useAppRelayPrefs } from '../hooks/useAppRelayPrefs';
 import { enabledAppRelays } from '../services/appRelayPrefs';
 import { useEffect, useRef } from 'react';
 import { AppState } from 'react-native';
@@ -23,6 +24,7 @@ const START_DELAY_MS = 3_000;
  */
 export function MarmotBridge(): null {
   const { isLoggedIn, pubkey, signerType, relays } = useNostr();
+  const relayScope = useAppRelayPrefs();
   const relaysRef = useRef(relays);
   relaysRef.current = relays;
 
@@ -66,13 +68,13 @@ export function MarmotBridge(): null {
     const unique = (urls: string[]) => [...new Set(urls)];
     const writeRelays = () => {
       const own = relaysRef.current.filter((r) => r.write).map((r) => r.url);
-      return own.length > 0 ? own : enabledAppRelays('default', DEFAULT_RELAYS);
+      return own.length > 0 ? own : enabledAppRelays('default', DEFAULT_RELAYS, pubkey);
     };
     const lookupRelays = () =>
       unique([
         ...relaysRef.current.filter((r) => r.read).map((r) => r.url),
-        ...enabledAppRelays('indexers', RELAY_LIST_INDEXERS),
-        ...enabledAppRelays('default', DEFAULT_RELAYS),
+        ...enabledAppRelays('indexers', RELAY_LIST_INDEXERS, pubkey),
+        ...enabledAppRelays('default', DEFAULT_RELAYS, pubkey),
       ]);
 
     let session: MarmotSession | null = null;
@@ -107,6 +109,11 @@ export function MarmotBridge(): null {
       if (session) setMarmotSession(null);
     };
   }, [isLoggedIn, pubkey, signerType]);
+
+  useEffect(() => {
+    const session = getMarmotSession();
+    if (session?.pubkey === pubkey) session.refreshRelaySubscriptions();
+  }, [pubkey, relays, relayScope]);
 
   return null;
 }

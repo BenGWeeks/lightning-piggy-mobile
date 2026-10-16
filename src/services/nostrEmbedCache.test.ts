@@ -236,3 +236,15 @@ it('keeps a shared query until its last focused reader leaves, then aborts', asy
   await settle(Promise.all([first, second]));
   expect(peekEmbed(`e:${id('1')}`)).toBeUndefined();
 });
+
+it('retries a cached miss after relay plan changes while retaining positive cache entries', async () => {
+  mockQuery.mockResolvedValue([]);
+  await settle(resolveEmbed(eventRef(id('3')), []));
+  mockQuery.mockResolvedValue([ev({ id: id('3') })]);
+  expect((await resolveEmbed(eventRef(id('3')), ['wss://read'])).event).toBeNull();
+  const recovered = await settle(resolveEmbed(eventRef(id('3')), ['wss://read'], undefined, true));
+  expect(recovered.event?.id).toBe(id('3'));
+  const count = mockQuery.mock.calls.length;
+  await settle(resolveEmbed(eventRef(id('3')), ['wss://other'], undefined, true));
+  expect(mockQuery).toHaveBeenCalledTimes(count);
+});

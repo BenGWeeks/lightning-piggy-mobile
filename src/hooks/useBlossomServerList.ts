@@ -1,3 +1,4 @@
+import { useAppRelayPrefs } from './useAppRelayPrefs';
 import type { PublishProgress } from '../utils/relayPublishProgress';
 import { lockRelays } from '../config/testRelayLockdown';
 import { enabledAppRelays } from '../services/appRelayPrefs';
@@ -51,6 +52,7 @@ const sameList = (a: string[], b: string[]) =>
  * neither a late lookup nor a publish result can override a newer edit.
  */
 export function useBlossomServerList() {
+  const relayScope = useAppRelayPrefs();
   const { pubkey, relays, signEvent } = useNostr();
   const [servers, setServers] = useState<string[]>([]);
   // The list last published (null = never): Publish is offered whenever the
@@ -89,7 +91,9 @@ export function useBlossomServerList() {
       try {
         const publishedBaseline = pubkey ? await getPublishedBlossomServers(pubkey) : null;
         if (!cancelled) setPublishedList(publishedBaseline);
+        if (cancelled) return;
         const saved = await getSavedBlossomServers();
+        if (cancelled) return;
         if (saved) {
           if (!cancelled) setServers(saved);
           return;
@@ -100,6 +104,7 @@ export function useBlossomServerList() {
         // Same form as every other entry (e.g. no trailing slash), so it
         // matches what gets published and isn't duplicated on re-add.
         const legacy = savedLegacy ? (normalizeBlossomServer(savedLegacy) ?? savedLegacy) : null;
+        if (cancelled) return;
         if (legacy && legacy !== DEFAULT_BLOSSOM_SERVER) {
           await setBlossomServers([legacy]);
           if (!cancelled) setServers([legacy]);
@@ -114,6 +119,7 @@ export function useBlossomServerList() {
             ...enabledAppRelays('indexers', RELAY_LIST_INDEXERS),
           ]),
         ]).catch(() => null);
+        if (cancelled) return;
         if (event) noteCreatedAt(pubkey, event.created_at);
         const published = event ? blossomServersFromTags(event.tags) : [];
         if (cancelled || published.length === 0 || activePubkeyRef.current !== pubkey) return;
@@ -130,9 +136,9 @@ export function useBlossomServerList() {
     return () => {
       cancelled = true;
     };
-    // Load once per identity; relay churn shouldn't reload mid-edit.
+    // Retry on app preference hydration/edits; saved choices still win.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pubkey]);
+  }, [pubkey, relayScope]);
 
   const editable = !loading && !publishing;
   const dirty = publishedList === null || !sameList(servers, publishedList);

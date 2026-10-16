@@ -1,3 +1,4 @@
+import { useAppRelayPrefs } from '../../hooks/useAppRelayPrefs';
 import { enabledAppRelays } from '../../services/appRelayPrefs';
 import BrandedSpinner from '../../components/BrandedSpinner';
 import React, { useEffect, useMemo, useState } from 'react';
@@ -41,6 +42,7 @@ const AboutScreen: React.FC = () => {
   const styles = useMemo(() => createAboutScreenStyles(colors), [colors]);
   const { isLoggedIn, signerType, sendDirectMessage } = useNostr();
 
+  const relayScope = useAppRelayPrefs();
   const [teamProfile, setTeamProfile] = useState<NostrProfile | null>(null);
   const [teamProfileLoading, setTeamProfileLoading] = useState(true);
   const [teamPictureError, setTeamPictureError] = useState(false);
@@ -98,7 +100,7 @@ const AboutScreen: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [relayScope]);
 
   return (
     <AccountScreenLayout title={t('aboutScreen.title')}>

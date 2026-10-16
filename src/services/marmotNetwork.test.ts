@@ -587,3 +587,18 @@ test('session and push fallbacks retain owner preferences across an account swit
   expect(pushTargets).toContain(DEFAULT_RELAYS[1]);
   await forgetAppRelayPrefs(owner);
 });
+
+it('invalidates cached fallback inbox targets after hydration and preference changes', async () => {
+  const owner = 'a'.repeat(64);
+  await forgetAppRelayPrefs(owner);
+  setCurrentUserPubkey(owner);
+  mockQuerySync.mockResolvedValue([]);
+  const network = createMarmotNetwork(() => [], undefined, owner);
+  expect(await network.getUserInboxRelays(SERVER)).toEqual([]);
+  await setAppRelayEnabled(owner, 'default', DEFAULT_RELAYS[0], true);
+  expect(await network.getUserInboxRelays(SERVER)).toContain(DEFAULT_RELAYS[0]);
+  await setAppRelayEnabled(owner, 'default', DEFAULT_RELAYS[0], false);
+  expect(await network.getUserInboxRelays(SERVER)).not.toContain(DEFAULT_RELAYS[0]);
+  setCurrentUserPubkey(null);
+  await forgetAppRelayPrefs(owner);
+});
