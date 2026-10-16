@@ -61,6 +61,7 @@ export function useNip17FileComposer(
       const result = await File.pickFileAsync();
       const file = Array.isArray(result) ? result[0] : result;
       if (!file) return;
+      let preparedUri: string | undefined;
       try {
         if (!authorized()) return;
         // Bound JS encryption/base64 memory before reading, then check actual
@@ -71,15 +72,30 @@ export function useNip17FileComposer(
         if (size <= 0 || size > MAX_UPLOAD_BYTES) throw new RangeError('File size');
         const filename = sanitizeAttachmentText(await selectedDocumentName(file));
         if (!authorized()) return;
+        // Lazy-load byte parsing/native fallback only after the user picks a file.
+        const { prepareFileAttachment } =
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          require('../services/fileAttachmentMetadata') as typeof import('../services/fileAttachmentMetadata');
+        const prepared = await prepareFileAttachment(
+          file.uri,
+          base64,
+          file.type || 'application/octet-stream',
+          filename,
+        );
+        preparedUri = prepared.uri;
+        if (!authorized()) return;
+        if (Buffer.byteLength(prepared.base64, 'base64') > MAX_UPLOAD_BYTES) {
+          throw new RangeError('File size');
+        }
         const started = performance.now();
         const uploaded = await upload.uploadEncryptedBlob(
-          file.uri,
+          prepared.uri,
           async (...args) => {
             if (!authorized()) throw new Error('File picking was cancelled: target changed');
             return signEvent(...args);
           },
-          file.type || 'application/octet-stream',
-          base64,
+          prepared.mime,
+          prepared.base64,
         );
         if (__DEV__ || process.env.EXPO_PUBLIC_KEEP_PERF_LOGS === '1') {
           console.log(
@@ -87,9 +103,12 @@ export function useNip17FileComposer(
           );
         }
         if (!authorized()) return;
-        await latest.current.send({ ...uploaded, filename }, 'file', 'nip17');
+        await latest.current.send({ ...uploaded, filename: prepared.filename }, 'file', 'nip17');
       } finally {
         // iOS returns a temporary copy. Never delete the user's original.
+        if (preparedUri && preparedUri !== file.uri && preparedUri.startsWith(Paths.cache.uri)) {
+          new File(preparedUri).delete();
+        }
         if (file.uri.startsWith(Paths.cache.uri)) file.delete();
       }
     } catch (error) {

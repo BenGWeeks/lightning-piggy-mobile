@@ -208,9 +208,16 @@ export function parseFileAttachment(text: string): FileAttachment | null {
   const p = new URLSearchParams(fragment);
   if (p.get('lpe') !== '1') return null;
   const mime = displayMetadata('', p.get('m') ?? 'application/octet-stream').mime;
-  if ((mime.startsWith('image/') && mime !== 'image/svg+xml') || mime.startsWith('audio/'))
-    return null;
   const alg = p.get('alg') ?? 'aes-gcm';
+  // Attach → File supplies a filename; gallery images do not. Keep these
+  // named NIP-17 images as file cards so recipients can Save the actual bytes.
+  // Marmot image filenames are required encryption metadata, not file intent.
+  const namedImageFile = alg === 'aes-gcm' && !!p.get('f');
+  if (
+    (mime.startsWith('image/') && mime !== 'image/svg+xml' && !namedImageFile) ||
+    mime.startsWith('audio/')
+  )
+    return null;
   const nonceHex = p.get('n') ?? undefined;
   const keyHex = p.get('k') ?? undefined;
   const filename = p.get('f') ?? '';

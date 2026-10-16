@@ -1,0 +1,62 @@
+import { Buffer } from 'buffer';
+import { prepareFileAttachment } from './fileAttachmentMetadata';
+import { stripImageMetadata } from './imageUploadService';
+
+jest.mock('./imageUploadService', () => ({ stripImageMetadata: jest.fn() }));
+const strip = jest.mocked(stripImageMetadata);
+
+beforeEach(() => strip.mockReset());
+
+it('passes PDF bytes, URI, MIME and filename through unchanged', async () => {
+  const result = await prepareFileAttachment(
+    'file:///document.pdf',
+    'cGRm',
+    'application/pdf',
+    'a.pdf',
+  );
+  expect(result).toEqual({
+    uri: 'file:///document.pdf',
+    base64: 'cGRm',
+    mime: 'application/pdf',
+    filename: 'a.pdf',
+  });
+  expect(strip).not.toHaveBeenCalled();
+});
+
+it('uses sanitized JPEG bytes without invoking native re-encoding', async () => {
+  const jpeg = Buffer.from([255, 216, 255, 225, 0, 5, 71, 80, 83, 255, 218, 0, 2, 1, 2, 255, 217]);
+  const result = await prepareFileAttachment(
+    'file:///a.jpg',
+    jpeg.toString('base64'),
+    'image/jpeg',
+    'a.jpg',
+  );
+  expect(Buffer.from(result.base64, 'base64')).toEqual(
+    Buffer.from([255, 216, 255, 218, 0, 2, 1, 2, 255, 217]),
+  );
+  expect(result.mime).toBe('image/jpeg');
+  expect(result.filename).toBe('a.jpg');
+  expect(strip).not.toHaveBeenCalled();
+});
+
+it.each(['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif', 'image/gif'])(
+  're-encodes malformed/unsupported %s and updates MIME and extension',
+  async (mime) => {
+    strip.mockResolvedValue({ uri: 'file:///cache/clean.jpg', base64: 'Y2xlYW4=' });
+    const result = await prepareFileAttachment('file:///a.gif', 'R1BT', mime, 'a.gif');
+    expect(strip).toHaveBeenCalledWith('file:///a.gif', 'R1BT', { preserveGif: false });
+    expect(result).toEqual({
+      uri: 'file:///cache/clean.jpg',
+      base64: 'Y2xlYW4=',
+      mime: 'image/jpeg',
+      filename: 'a.jpg',
+    });
+  },
+);
+
+it('aborts on native failure instead of returning original image bytes', async () => {
+  strip.mockRejectedValue(new Error('Cannot decode image'));
+  await expect(
+    prepareFileAttachment('file:///broken.jpg', 'R1BT', 'image/jpeg', 'a.jpg'),
+  ).rejects.toThrow('Cannot decode image');
+});

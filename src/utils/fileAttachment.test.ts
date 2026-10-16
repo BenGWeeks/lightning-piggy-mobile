@@ -392,3 +392,20 @@ it.each([4, 14])(
     expect(parsePlainFileAttachment('https://example.com/a.jpg')).toBeNull();
   },
 );
+
+it('keeps named NIP-17 image files saveable while gallery images retain image bubbles', () => {
+  const params = {
+    url: 'https://blossom.example/photo.jpg',
+    mime: 'image/jpeg',
+    keyHex: '11'.repeat(32),
+    nonceHex: '22'.repeat(12),
+    sha256: '33'.repeat(32),
+    size: 4220,
+  };
+  const named = encodeEncryptedFileUrl({ ...params, filename: 'photo.jpg' });
+  expect(classifyStoredMessage(named, 15)).toMatchObject({
+    kind: 'file',
+    file: { name: 'photo.jpg', mime: 'image/jpeg', available: true },
+  });
+  expect(classifyAttachment(encodeEncryptedFileUrl(params), 15)).toBe('image');
+});
