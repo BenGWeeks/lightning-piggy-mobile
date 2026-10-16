@@ -399,7 +399,7 @@ const AccountDrawerContent: React.FC<DrawerContentComponentProps> = (props) => {
                 if (row.name === 'MarketMyOrders' || row.name === 'MarketMyShop') {
                   props.navigation.navigate('MainTabs', {
                     screen: 'Explore',
-                    params: { screen: row.name },
+                    params: { screen: row.name, initial: false },
                   });
                 } else props.navigation.navigate(row.name);
               }}

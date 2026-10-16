@@ -120,8 +120,9 @@ let mockBuyerActions = 0;
 let mockSellerActions = 0;
 let mockHasListings = false;
 let mockLikedProducts: { id: string }[] = [];
+let mockLikedFailed = false;
 jest.mock('../hooks/useLikedListings', () => ({
-  useLikedListings: () => ({ products: mockLikedProducts }),
+  useLikedListings: () => ({ products: mockLikedProducts, failed: mockLikedFailed }),
 }));
 jest.mock('../contexts/MarketShortcutsContext', () => ({
   useMarketShortcutCounts: () => ({
@@ -200,6 +201,7 @@ beforeEach(() => {
   mockSellerActions = 0;
   mockHasListings = false;
   mockLikedProducts = [];
+  mockLikedFailed = false;
   jest.useFakeTimers();
   mockLiveEnabled.mockClear();
   mockFofEnabled.mockClear();
@@ -758,6 +760,25 @@ it('shows positive liked counts and hides the zero badge', () => {
   screen.unmount();
   const updated = render(<MarketScreen navigation={navigation} />);
   expect(updated.getByTestId('market-shortcut-liked-badge')).toHaveTextContent('3');
+});
+
+it('does not report a zero liked count after a failed fetch', () => {
+  mockLikedFailed = true;
+  const screen = render(<MarketScreen navigation={navigation} />);
+  expect(screen.queryByTestId('market-shortcut-liked-badge')).toBeNull();
+  expect(screen.getByTestId('market-shortcut-liked').props.accessibilityLabel).toBe(
+    'market.shortcuts.liked',
+  );
+});
+
+it('keeps the known liked count after a failed refresh', () => {
+  mockLikedFailed = true;
+  mockLikedProducts = [{ id: 'one' }];
+  const screen = render(<MarketScreen navigation={navigation} />);
+  expect(screen.getByTestId('market-shortcut-liked-badge')).toHaveTextContent('1');
+  expect(screen.getByTestId('market-shortcut-liked').props.accessibilityLabel).toBe(
+    'market.shortcuts.liked, 1',
+  );
 });
 
 it('shows My shop and its action badge for a seller with listings', () => {
