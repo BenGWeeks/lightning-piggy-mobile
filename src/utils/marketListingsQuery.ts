@@ -23,7 +23,12 @@ export const MARKET_LISTING_KINDS = [30018, 30402];
  * Plebeian Market writes to its own relay, and Robotechy's listing is on
  * nostr.mom, which isn't even in Robotechy's own kind-10002 list.
  */
-export const MARKET_RELAYS = ['wss://relay.plebeian.market', 'wss://nostr.mom'];
+export const MARKET_RELAYS = [
+  'wss://relay.plebeian.market',
+  'wss://relay.conduit.market',
+  'wss://relay.weeksfamily.me',
+  'wss://nostr.mom',
+];
 
 /** Authors per filter — relays reject very long `authors` arrays. */
 export const AUTHOR_BATCH = 64;

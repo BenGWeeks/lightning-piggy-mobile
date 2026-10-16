@@ -1579,6 +1579,8 @@
     "geoCacheRelaysHint": "Dedikált relay-ek Pigletekhez és más geoládákhoz (NIP-GC). Ezek tükrözik, amit a treasures.to webalkalmazás olvas és keres, így a Pigletjeid a weben is megtalálhatók maradnak. A geoládák közzétételéhez és olvasásához mindig használatban vannak, a fent hozzáadott relay-eken felül.",
     "marmotRelays": "Csoportos üzenetküldési relay-ek (Marmot)",
     "marmotRelaysHint": "A Marmot csoportos üzenetküldés ismert relay-ei, amelyeket a White Noise is használ. A meghívókulcsaid (kulcscsomagjaid) itt és a saját relay-eiden is megjelennek, így mások akkor is indíthatnak veled titkosított csoportos csevegést, ha a relay-eid nem érhetők el. Ezeket a kulcscsomagok relay-listája (10051-es típus) hirdeti.",
+    "marketRelays": "Piactéri relayek (Gamma)",
+    "marketRelaysHint": "Relayek, amelyekről a Lightning Piggy beolvassa a Piac hirdetéseit, és amelyekre közzéteszi a boltod hirdetéseit. Más Gamma Markets alkalmazásokkal (Plebeian, Conduit, Shopstr) közösen használjuk őket.",
     "encryptedMessages": "Titkosított üzenetek (NIP-17)",
     "amberPermissionHint": "Az Amber még nem adott NIP-44 visszafejtési engedélyt ennek az alkalmazásnak – az engedélyezéshez koppints alább. Egy párbeszédablak, utána a további titkosított üzenetek csendben visszafejtődnek. A nem követett emberek üzenetei mindkét esetben rejtve maradnak.",
     "amberPermissionTitle": "Amber-engedély",
