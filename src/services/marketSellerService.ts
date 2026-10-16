@@ -36,7 +36,10 @@ const SELLER_KINDS = [LISTING_KIND, COLLECTION_KIND, SHIPPING_OPTION_KIND, DELET
 // Reads include every publication target and displaced write relay. Only
 // publishing caps the full set; reads query it in bounded batches instead.
 function sellerEventRelays(relays: readonly string[], pubkey?: string): string[] {
-  return lockRelays([...new Set([...enabledAppRelays('market', MARKET_RELAYS), ...relays])], pubkey);
+  return lockRelays(
+    [...new Set([...enabledAppRelays('market', MARKET_RELAYS), ...relays])],
+    pubkey,
+  );
 }
 
 /** Keep the user's write relays distinct for pre-publish revision checks. */
