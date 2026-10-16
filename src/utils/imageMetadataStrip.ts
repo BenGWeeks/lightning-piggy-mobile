@@ -195,6 +195,25 @@ export function stripWebpMetadata(bytes: Uint8Array): Uint8Array {
   return result;
 }
 
+/** Recognize photo signatures even when a document provider returns generic MIME. */
+export function detectImageMime(bytes: Uint8Array): string | undefined {
+  if (bytes[0] === 0xff && bytes[1] === 0xd8) return 'image/jpeg';
+  if (text(bytes, 0, 8) === '\x89PNG\r\n\x1a\n') return 'image/png';
+  if (text(bytes, 0, 4) === 'RIFF' && text(bytes, 8, 4) === 'WEBP') return 'image/webp';
+  if (['GIF87a', 'GIF89a'].includes(text(bytes, 0, 6))) return 'image/gif';
+  if (text(bytes, 4, 4) === 'ftyp') {
+    const brand = text(bytes, 8, 4);
+    if (
+      ['heic', 'heix', 'hevc', 'hevx', 'heim', 'heis', 'hevm', 'hevs', 'mif1', 'msf1'].includes(
+        brand,
+      )
+    ) {
+      return 'image/heif';
+    }
+    if (['avif', 'avis'].includes(brand)) return 'image/avif';
+  }
+}
+
 export function stripImageMetadataBytes(bytes: Uint8Array, mime: string): Uint8Array {
   switch (mime.toLowerCase()) {
     case 'image/jpeg':

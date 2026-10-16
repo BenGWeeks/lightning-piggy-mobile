@@ -456,6 +456,7 @@ display name through the local `document-metadata` native module (a native
 rebuild is required). An optional `filename` tag carries the sanitized filename.
 Images picked via Attach → File are sanitized before encryption by
 `fileAttachmentMetadata` and the pure `imageMetadataStrip` byte parsers.
+Photo signatures are checked even when the provider MIME is generic.
 JPEG drops APP1 (EXIF/XMP), APP13 (IPTC) and COM while preserving compressed
 image data, JFIF, ICC and Adobe segments. A fresh EXIF segment contains only a
 valid IFD0 Orientation, with no GPS pointers or thumbnail. PNG drops eXIf,

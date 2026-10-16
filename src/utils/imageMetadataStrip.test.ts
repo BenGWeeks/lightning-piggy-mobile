@@ -1,5 +1,6 @@
 import { Buffer } from 'buffer';
 import {
+  detectImageMime,
   stripImageMetadataBytes,
   stripJpegMetadata,
   stripPngMetadata,
@@ -157,4 +158,17 @@ describe('lossless file image metadata stripping', () => {
     'rejects malformed/unsupported %s for the native fallback',
     (mime) => expect(() => stripImageMetadataBytes(new Uint8Array([1, 2, 3]), mime)).toThrow(),
   );
+});
+
+it.each([
+  [[255, 216], 'image/jpeg'],
+  [[137, 80, 78, 71, 13, 10, 26, 10], 'image/png'],
+  [[...ascii('RIFF'), 0, 0, 0, 0, ...ascii('WEBP')], 'image/webp'],
+  [ascii('GIF89a'), 'image/gif'],
+  [[0, 0, 0, 24, ...ascii('ftypheic')], 'image/heif'],
+  [[0, 0, 0, 24, ...ascii('ftypavif')], 'image/avif'],
+  [ascii('%PDF-1.4'), undefined],
+  [[], undefined],
+])('detects image signatures in %j', (header, mime) => {
+  expect(detectImageMime(new Uint8Array(header as number[]))).toBe(mime);
 });
