@@ -25,11 +25,14 @@ import type { ParsedOrderEvent } from '../utils/orderEvents';
 const REFRESH_MS = 5 * 60_000;
 const inFlight = new Map<string, Promise<void>>();
 const fetchedScopes = new Map<string, string>();
+const requestedScopes = new Map<string, string>();
 
 /** Restore the persisted snapshot, then refresh from relays if stale — one
  * request per account however many order cards mount at once. */
 function ensureSellerSnapshot(pubkey: string, relays: string[], relayScope: string): Promise<void> {
-  const key = `${pubkey}:${relayScope}`;
+  const key = JSON.stringify([pubkey, relayScope, relays]);
+  // Record even a deduplicated request: switching A → B → A makes A current again.
+  requestedScopes.set(pubkey, key);
   const pending = inFlight.get(key);
   if (pending) return pending;
   const run = (async () => {
@@ -39,15 +42,17 @@ function ensureSellerSnapshot(pubkey: string, relays: string[], relayScope: stri
         loadSellerCache(pubkey),
         loadHiddenListings(pubkey),
       ]);
+      if (requestedScopes.get(pubkey) !== key) return;
       restoreSellerAccount(pubkey, events, hidden);
     }
     if (
-      fetchedScopes.get(pubkey) === relayScope &&
+      fetchedScopes.get(pubkey) === key &&
       Date.now() - sellerStoreState(pubkey).fetchedAt < REFRESH_MS
     )
       return;
     const events = await fetchSellerEvents({ pubkey, relays });
-    fetchedScopes.set(pubkey, relayScope);
+    if (requestedScopes.get(pubkey) !== key) return;
+    fetchedScopes.set(pubkey, key);
     addSellerEvents(pubkey, events, true);
     await persistSellerSnapshot(pubkey);
   })()

@@ -3,7 +3,7 @@ import type { PublishProgress } from '../utils/relayPublishProgress';
 import { lockRelays } from '../config/testRelayLockdown';
 import { enabledAppRelays } from '../services/appRelayPrefs';
 import { isTestRelayLockdown, TEST_RELAY_URL } from '../config/testRelayLockdown';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { Event } from 'nostr-tools';
 import { useNostr } from '../contexts/NostrContext';
 import { readAdoptedCreatedAt } from '../contexts/useNip65Relays';
@@ -92,7 +92,9 @@ export function useRelayListEditor() {
   }, [nip65Relays, nip65Dirty]);
 
   const dirtyRef = useRef({ nip65: nip65Dirty, inbox: inboxDirty });
-  dirtyRef.current = { nip65: nip65Dirty, inbox: inboxDirty };
+  useLayoutEffect(() => {
+    dirtyRef.current = { nip65: nip65Dirty, inbox: inboxDirty };
+  }, [nip65Dirty, inboxDirty]);
   const relayUrls = useMemo(() => relays.map((r) => r.url), [relays]);
   useEffect(() => {
     // Per identity: drop any draft from the previous account, so one
@@ -202,9 +204,11 @@ export function useRelayListEditor() {
   // only when that list CHANGES (not when loading finishes, which would
   // overwrite a just-fetched list with an older provider value).
   const inboxDirtyRef = useRef(inboxDirty);
-  inboxDirtyRef.current = inboxDirty;
   const inboxLoadingRef = useRef(inboxLoading);
-  inboxLoadingRef.current = inboxLoading;
+  useLayoutEffect(() => {
+    inboxDirtyRef.current = inboxDirty;
+    inboxLoadingRef.current = inboxLoading;
+  }, [inboxDirty, inboxLoading]);
   useEffect(() => {
     if (inboxDirtyRef.current || inboxLoadingRef.current) return;
     setInboxDraft(dmInboxRelays);
