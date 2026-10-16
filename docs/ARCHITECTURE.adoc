@@ -454,6 +454,22 @@ The NIP-17 composer uses Expo FileSystem's system picker and uploads ciphertext
 to Blossom, with a 16 MiB plaintext upload limit. Android reads the provider's
 display name through the local `document-metadata` native module (a native
 rebuild is required). An optional `filename` tag carries the sanitized filename.
+Images picked via Attach → File are sanitized before encryption by
+`fileAttachmentMetadata` and the pure `imageMetadataStrip` byte parsers.
+Photo signatures (including TIFF) are checked even when the provider MIME is
+generic. Generic-MIME files with image extensions also require sanitization.
+JPEG drops APP1 (EXIF/XMP), APP13 (IPTC) and COM while preserving compressed
+image data, JFIF, ICC and Adobe segments. A fresh EXIF segment contains only a
+valid IFD0 Orientation, with no GPS pointers or thumbnail. PNG drops eXIf,
+tEXt, iTXt, zTXt and tIME after validating chunk CRCs; WebP drops EXIF/XMP and updates RIFF size and VP8X
+flags. Both retain image chunks verbatim. Unsupported images (including HEIC)
+and malformed streams use native metadata-stripping re-encoding; failure aborts
+the send. Re-encoded files use the output MIME and extension. This fallback
+can change quality and flatten animation. Non-images, including PDFs, retain
+their original bytes. Named NIP-17 image files retain file cards with Save and
+Share; gallery images keep image bubbles. Owner/session checks surround
+preparation and upload.
+
 Blossom learns the uploader's public key through signed BUD-02 authorization
 and sees their IP address. Downloading a file reveals the recipient's IP address
 to its hosting server; plain URLs can use an arbitrary sender-chosen host.
