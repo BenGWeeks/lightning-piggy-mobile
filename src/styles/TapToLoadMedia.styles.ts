@@ -21,10 +21,10 @@ export const createTapToLoadMediaStyles = (colors: Palette, fromMe: boolean) =>
       alignItems: 'center',
       gap: 10,
     },
-    // Image variant: fills the image bubble's width at a reduced height.
+    // Image variant: fills the bubble; the caller supplies the bounded aspect.
     imageBox: {
-      width: 240,
-      height: 120,
+      width: '100%',
+      aspectRatio: 1,
       backgroundColor: colors.background,
       alignItems: 'center',
       justifyContent: 'center',

@@ -77,7 +77,7 @@ const DecryptedImage: React.FC<Props> = ({
 
   if (blocked)
     return (
-      <View style={styles.center}>
+      <View style={[style, styles.center]}>
         <Text style={styles.blocked}>{t('messageBubble.blockedLink')}</Text>
       </View>
     );
