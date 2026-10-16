@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { cacheMessageDisplayProfiles } from '../services/cachedDisplayProfiles';
 import type { ContactInfo } from '../components/GroupAvatar';
 import type { NostrContact, NostrProfile } from '../types/nostr';
 import type { DmInboxEntry } from '../utils/conversationSummaries';
@@ -137,6 +138,9 @@ export function useNonFollowProfiles({
   // duplicate the write.
   useEffect(() => {
     if (!owned.owner || owned.profiles.size === 0) return;
+    // Mirror the merged result, so a delayed disk read cannot replace a
+    // fresher fetched name for already-subscribed mention/sender consumers.
+    void cacheMessageDisplayProfiles(owned.profiles).catch(() => {});
     AsyncStorage.setItem(
       nonFollowProfilesKey(owned.owner),
       JSON.stringify(Object.fromEntries(owned.profiles)),
