@@ -4,12 +4,12 @@ import type { Palette } from './palettes';
 export const createMarketShortcutsStyles = (colors: Palette) =>
   StyleSheet.create({
     scroll: { flexGrow: 0, flexShrink: 0 },
-    row: { flexDirection: 'row', gap: 16, paddingHorizontal: 16, paddingTop: 16 },
+    row: { flexDirection: 'row', gap: 8, paddingHorizontal: 16, paddingTop: 16 },
     chip: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 8,
-      paddingHorizontal: 12,
+      gap: 4,
+      paddingHorizontal: 6,
       paddingVertical: 10,
       minHeight: 44,
       borderRadius: 999,

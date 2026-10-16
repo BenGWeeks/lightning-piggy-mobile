@@ -751,9 +751,9 @@ it('hides zero action badges and offers Start selling without listings', () => {
   );
 });
 
-it('shows the number of liked listings, including zero', () => {
+it('shows positive liked counts and hides the zero badge', () => {
   const screen = render(<MarketScreen navigation={navigation} />);
-  expect(screen.getByTestId('market-shortcut-liked-badge')).toHaveTextContent('0');
+  expect(screen.queryByTestId('market-shortcut-liked-badge')).toBeNull();
   mockLikedProducts = [{ id: 'one' }, { id: 'two' }, { id: 'three' }];
   screen.unmount();
   const updated = render(<MarketScreen navigation={navigation} />);

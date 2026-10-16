@@ -1,3 +1,4 @@
+import type { Event } from 'nostr-tools';
 import type { BuyerOrderEntry } from './orderThreads';
 import type { ShopOrderStatus } from './shopOrderStatus';
 
@@ -14,4 +15,15 @@ export function sellerActionCount(statuses: Iterable<ShopOrderStatus>): number {
   for (const status of statuses)
     if (status === 'needsInvoice' || status === 'invoiceExpired') count += 1;
   return count;
+}
+
+/** Verified own listings from the seller store or any loaded Market scope. */
+export function hasOwnMarketListings(
+  pubkey: string | null,
+  events: Iterable<Pick<Event, 'pubkey' | 'kind'>>,
+): boolean {
+  if (!pubkey) return false;
+  for (const event of events)
+    if (event.kind === 30402 && event.pubkey.toLowerCase() === pubkey.toLowerCase()) return true;
+  return false;
 }

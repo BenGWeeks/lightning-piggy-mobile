@@ -4,6 +4,7 @@ import { useBuyerOrders } from '../hooks/useBuyerOrders';
 import { useSellerShop } from '../hooks/useSellerShop';
 import { useShopOrders } from '../hooks/useShopOrders';
 import { listingTitleMap } from '../utils/shopOrders';
+import { useKnownOwnListings } from '../hooks/useKnownOwnListings';
 import { buyerActionCount, sellerActionCount } from '../utils/marketShortcutCounts';
 import {
   effectiveSellerInvoice,
@@ -27,7 +28,8 @@ const Context = createContext<ShortcutCounts>({
  * use bounded fetches / local stores; no additional live relay subscriptions. */
 export function MarketShortcutsProvider({ children }: { children: React.ReactNode }) {
   const { entries } = useBuyerOrders();
-  const { snapshot } = useSellerShop();
+  const { pubkey, snapshot } = useSellerShop();
+  const hasListings = useKnownOwnListings(pubkey, snapshot.listings);
   const titles = useMemo(() => listingTitleMap(snapshot.listings), [snapshot.listings]);
   const { orders, threads, invoices, paidKeys } = useShopOrders(titles);
   const [nowMs, setNowMs] = useState(Date.now);
@@ -50,7 +52,7 @@ export function MarketShortcutsProvider({ children }: { children: React.ReactNod
   const value = useMemo(
     () => ({
       buyer: buyerActionCount(entries),
-      hasListings: snapshot.listings.length > 0,
+      hasListings,
       seller: sellerActionCount(
         (orders ?? []).map((order) => {
           const thread = threads.get(order.key);
@@ -69,7 +71,7 @@ export function MarketShortcutsProvider({ children }: { children: React.ReactNod
         }),
       ),
     }),
-    [entries, snapshot.listings, orders, threads, invoices, paidKeys, nowMs],
+    [entries, hasListings, orders, threads, invoices, paidKeys, nowMs],
   );
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }

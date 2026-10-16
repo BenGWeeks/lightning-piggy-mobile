@@ -51,16 +51,12 @@ function MarketShortcuts({ navigation }: { navigation: ExploreNavigation }) {
           testID={`market-shortcut-${id}`}
           style={styles.chip}
           accessibilityRole="button"
-          accessibilityLabel={id === 'liked' || count > 0 ? `${label}, ${count}` : label}
+          accessibilityLabel={count > 0 ? `${label}, ${count}` : label}
           onPress={() => navigation.navigate(route)}
         >
-          <Icon size={20} color={colors.brandPink} />
+          <Icon size={18} color={colors.brandPink} />
           <Text style={styles.label}>{label}</Text>
-          <MarketShortcutBadge
-            count={count}
-            showZero={id === 'liked'}
-            testID={`market-shortcut-${id}-badge`}
-          />
+          <MarketShortcutBadge count={count} testID={`market-shortcut-${id}-badge`} />
         </TouchableOpacity>
       ))}
     </ScrollView>
