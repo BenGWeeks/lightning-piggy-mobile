@@ -4,6 +4,8 @@ import ConversationMessageRow, { type ConversationMessageRowProps } from './Conv
 import { createConversationScreenStyles } from '../styles/ConversationScreen.styles';
 import { lightPalette } from '../styles/palettes';
 import i18n from '../i18n';
+import { buildMarketOrder } from '../utils/marketOrder';
+import { parseOrderEvent, type OrderEventType } from '../utils/orderEvents';
 import type MessageBubble from './MessageBubble';
 const mockNavigate = jest.fn();
 jest.mock('@react-navigation/native', () => ({
@@ -137,5 +139,48 @@ it.each([false, true])(
         },
       },
     });
+  },
+);
+
+// Exercise the chat row's real order renderer with the existing checkout shape.
+test.each(['order', 'payment', 'status', 'shipping', 'receipt'] as const)(
+  '%s chat rows strip checkout totals and preserve free text',
+  (type: OrderEventType) => {
+    for (const fromMe of [true, false]) {
+      for (const note of ['', 'Please leave at the door.']) {
+        const rumor = buildMarketOrder({
+          buyerPubkey: 'buyer',
+          vendorPubkey: 'seller',
+          orderId: 'f68fb42a',
+          lines: [{ merchantPubkey: 'seller', dTag: 'item', quantity: 1, priceSats: 21 }],
+          shipping: {
+            coordinate: '30406:seller:standard',
+            costSats: 0,
+            title: '[TEST] Standard (free)',
+          },
+          note,
+        }).rumor;
+        // Legacy stored rows may still contain the original generated suffix.
+        const order = { ...parseOrderEvent(rumor)!, type, message: rumor.content };
+        const ui = render(
+          <ConversationMessageRow
+            {...props}
+            item={{ kind: 'order', id: 'checkout', fromMe, createdAt: 100, order }}
+          />,
+        );
+        expect(ui.getByTestId('conversation-order-checkout')).toBeTruthy();
+        expect(ui.getByText('21 sats')).toBeTruthy();
+        expect(ui.queryByText(/Subtotal:|Shipping \(|Total:/)).toBeNull();
+        if (note) {
+          expect(ui.getByTestId('conversation-order-note-checkout')).toHaveTextContent(
+            type === 'order' ? `${i18n.t('sellerOrders.buyerNote')}: ${note}` : note,
+          );
+        } else {
+          expect(ui.queryByTestId('conversation-order-note-checkout')).toBeNull();
+        }
+        expect(order.message).toBe(rumor.content);
+        ui.unmount();
+      }
+    }
   },
 );
