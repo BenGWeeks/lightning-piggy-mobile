@@ -1,4 +1,10 @@
-import { buyerActionCount, sellerActionCount, hasOwnMarketListings } from './marketShortcutCounts';
+import { TEST_ACCOUNT_KEYS } from './testAccounts';
+import {
+  buyerActionCount,
+  sellerActionCount,
+  hasOwnMarketListings,
+  hasOwnCuratedMarketListings,
+} from './marketShortcutCounts';
 import type { BuyerOrderStatus } from './orderThreads';
 import type { ShopOrderStatus } from './shopOrderStatus';
 
@@ -45,4 +51,11 @@ it('recognises an own kind-30402 listing even before the seller snapshot loads',
   expect(hasOwnMarketListings(null, marketEvents)).toBe(false);
   expect(hasOwnMarketListings(pubkey, [{ kind: 30017, pubkey }])).toBe(false);
   expect(hasOwnMarketListings(pubkey, [])).toBe(false);
+});
+
+it('recognises built-in test products by their vendor pubkey, with no relay event', () => {
+  expect(hasOwnCuratedMarketListings(TEST_ACCOUNT_KEYS.big)).toBe(true);
+  expect(hasOwnCuratedMarketListings(TEST_ACCOUNT_KEYS.little)).toBe(true);
+  expect(hasOwnCuratedMarketListings('f'.repeat(64))).toBe(false);
+  expect(hasOwnCuratedMarketListings(null)).toBe(false);
 });

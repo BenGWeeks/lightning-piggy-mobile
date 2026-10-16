@@ -1,5 +1,7 @@
 import { act, renderHook } from '@testing-library/react-native';
 import type { Event } from 'nostr-tools';
+import { PREFERRED_SELLERS_ACCOUNT } from '../services/marketPreferredSellers';
+import { TEST_ACCOUNT_KEYS } from '../utils/testAccounts';
 import { useKnownOwnListings } from './useKnownOwnListings';
 
 const mockSnapshots = jest.fn();
@@ -20,7 +22,7 @@ jest.mock('@react-navigation/native', () => ({
   },
 }));
 
-it('updates both shortcut consumers when an own listing arrives in the Market snapshot', () => {
+it('updates shared shortcut state when an own listing arrives in the Market snapshot', () => {
   const pubkey = 'a'.repeat(64);
   const empty: Event[] = [];
   mockSnapshots.mockReturnValue([]);
@@ -29,7 +31,7 @@ it('updates both shortcut consumers when an own listing arrives in the Market sn
   mockSnapshots.mockReturnValue([{ products: [{ listing: { event: { kind: 30402, pubkey } } }] }]);
   act(() => mockNotify());
   expect(first.result.current).toBe(true);
-  expect(mockSnapshots).toHaveBeenLastCalledWith([pubkey]);
+  expect(mockSnapshots).toHaveBeenLastCalledWith([pubkey, PREFERRED_SELLERS_ACCOUNT]);
   mockSnapshots.mockReturnValue([]);
   act(() => mockNotify());
   expect(first.result.current).toBe(false);
@@ -48,4 +50,10 @@ it('uses own seller listings and drops them when the account changes', () => {
   expect(result.current).toBe(true);
   rerender({ account: 'b'.repeat(64) });
   expect(result.current).toBe(false);
+});
+
+it('recognises Big Piggy’s authored dev fixture without a kind-30402 event', () => {
+  mockSnapshots.mockReturnValue([]);
+  const { result } = renderHook(() => useKnownOwnListings(TEST_ACCOUNT_KEYS.big, []));
+  expect(result.current).toBe(true);
 });

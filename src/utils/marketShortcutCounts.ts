@@ -1,3 +1,5 @@
+import { MARKET_PRODUCTS, sellerOf } from '../data/marketProducts';
+import { vendorNostrPubkey } from './marketVendors';
 import type { Event } from 'nostr-tools';
 import type { BuyerOrderEntry } from './orderThreads';
 import type { ShopOrderStatus } from './shopOrderStatus';
@@ -26,4 +28,17 @@ export function hasOwnMarketListings(
   for (const event of events)
     if (event.kind === 30402 && event.pubkey.toLowerCase() === pubkey.toLowerCase()) return true;
   return false;
+}
+
+// Authored catalogue products (including dev-only test fixtures) have no
+// kind-30402 event. Resolve their known vendor identity, never a display-name match.
+const curatedSellers = new Set(
+  MARKET_PRODUCTS.flatMap((product) => {
+    const vendor = sellerOf(product);
+    const pubkey = vendor ? vendorNostrPubkey(vendor) : null;
+    return pubkey ? [pubkey] : [];
+  }),
+);
+export function hasOwnCuratedMarketListings(pubkey: string | null): boolean {
+  return !!pubkey && curatedSellers.has(pubkey.toLowerCase());
 }
