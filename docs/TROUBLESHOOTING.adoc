@@ -4,6 +4,9 @@
 |===
 | Problem | Solution
 
+| Marmot says "You added 2 devices (Unknown app ×2)" while the other participant sees their app names
+| The inviter caches kind-30443 `client` tags against MLS leaf signature keys. A receiving install sees only the Add commit's leaves, and only its own current leaf has a built-in app name; its account's other installs need the same key-package lookup as anyone else's. The notices hook now starts the existing bounded, cooldown-protected read-only lookup on focus and a newly observed epoch, without requiring the device-details sheet. Learned names trigger a reread, not another lookup. Notices persist signature keys, not labels, so existing notices update when a matching published package is found. An absent/replaced or untagged package stays unknown; the account pubkey never implies an app. This notice path uses key-package client tags, not MIP-06 device metadata. Regressions: `useMarmotDevices.test.ts`, `marmotDeviceTracker.test.ts` and the real MLS `marmotSessionDevices.test.ts`.
+
 | A document attachment shows only “📎 File” or “📎 Attachment” on the first DM thread load, then becomes a card after reopening
 | With an empty DM store, `fetchConversationFor` renders freshly ingested wrap entries before a stored-row read can supply the original content. Keep recognized kind-14 document URLs and kind-15 encoded attachment content in the entry's `renderText` while `text` retains the redacted inbox/notification label. Do not broaden this to wallet-share bearer secrets. Regression: `src/contexts/nostrFetchConversationAttachments.test.ts` exercises the real ingest and thread projection from an empty store, plus attachment classification and inbox redaction.
 
