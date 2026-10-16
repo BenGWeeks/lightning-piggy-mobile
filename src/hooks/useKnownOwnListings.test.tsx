@@ -8,6 +8,7 @@ const mockSnapshots = jest.fn();
 const mockRead = jest.fn();
 let mockNotify: () => void;
 jest.mock('../services/marketStorage', () => ({
+  unexpiredMarketProducts: jest.requireActual('../services/marketStorage').unexpiredMarketProducts,
   loadedMarketSnapshots: (...args: unknown[]) => mockSnapshots(...args),
   readLoadedMarketSnapshots: (...args: unknown[]) => mockRead(...args),
   subscribeMarketSnapshots: (listener: () => void) => {
@@ -21,6 +22,23 @@ jest.mock('@react-navigation/native', () => ({
     React.useEffect(effect, [effect]);
   },
 }));
+
+it.each([
+  ['expired', -60, false],
+  ['unexpired', 3600, true],
+  ['without expiry', undefined, true],
+] as const)('handles %s cached own listings', (_label, expiresIn, expected) => {
+  const pubkey = 'a'.repeat(64);
+  const tags =
+    expiresIn === undefined
+      ? []
+      : [['expiration', String(Math.floor(Date.now() / 1000) + expiresIn)]];
+  mockSnapshots.mockReturnValue([
+    { products: [{ listing: { event: { kind: 30402, pubkey, tags } } }] },
+  ]);
+  const { result } = renderHook(() => useKnownOwnListings(pubkey, []));
+  expect(result.current).toBe(expected);
+});
 
 it('updates shared shortcut state when an own listing arrives in the Market snapshot', () => {
   const pubkey = 'a'.repeat(64);

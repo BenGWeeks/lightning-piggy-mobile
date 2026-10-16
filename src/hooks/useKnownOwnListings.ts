@@ -5,6 +5,7 @@ import {
   loadedMarketSnapshots,
   readLoadedMarketSnapshots,
   subscribeMarketSnapshots,
+  unexpiredMarketProducts,
 } from '../services/marketStorage';
 import { PREFERRED_SELLERS_ACCOUNT } from '../services/marketPreferredSellers';
 import { hasOwnCuratedMarketListings, hasOwnMarketListings } from '../utils/marketShortcutCounts';
@@ -28,7 +29,9 @@ export function useKnownOwnListings(pubkey: string | null, sellerListings: reado
         ...sellerListings,
         ...loadedMarketSnapshots(pubkey ? [pubkey, PREFERRED_SELLERS_ACCOUNT] : []).flatMap(
           ({ products }) =>
-            products.flatMap((product) => (product.listing ? [product.listing.event] : [])),
+            unexpiredMarketProducts(products).flatMap((product) =>
+              product.listing ? [product.listing.event] : [],
+            ),
         ),
       ]),
     // revision signals a local catalogue change, including account wipes.
