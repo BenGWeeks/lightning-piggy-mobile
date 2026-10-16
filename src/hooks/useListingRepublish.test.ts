@@ -153,3 +153,35 @@ it('opens the progress sheet before relays answer, then fills in results', async
     results: [{ url: 'wss://example.com', status: 'accepted' }],
   });
 });
+
+it('closes the sheet when the screen loses focus mid-run', async () => {
+  const services = jest.requireMock('../services/listingRepublish');
+  const listing = {
+    id: 'signed',
+    sig: 'sig',
+    pubkey: 'seller',
+    kind: 30402,
+    created_at: 1,
+    content: '',
+    tags: [['d', 'item']],
+  } as Event;
+  jest.mocked(services.newestSignedListing).mockReturnValue(listing);
+  jest
+    .mocked(services.republishListing)
+    .mockImplementation(
+      (_p: string, _d: string, _s: unknown, signal: AbortSignal) =>
+        new Promise((resolve) =>
+          signal.addEventListener('abort', () => resolve([]), { once: true }),
+        ),
+    );
+  const { result, rerender } = renderHook(() => useListingRepublish([listing], jest.fn()));
+  await act(async () => {});
+  act(() => result.current.republishAll());
+  expect(result.current.progress.open).toBe(true);
+  mockFocused = false;
+  await act(async () => {
+    rerender({});
+  });
+  expect(result.current.progress.open).toBe(false);
+  expect(result.current.busy).toBe(false);
+});

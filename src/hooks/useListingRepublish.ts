@@ -72,6 +72,9 @@ export function useListingRepublish(
           .catch(() => {});
       return () => {
         abort.abort();
+        // Leaving the screen stops the run, so don't leave its sheet spinning.
+        sheetOpen.current = false;
+        setOpen(false);
       };
       // Keys avoid duplicate queries when the store emits an unchanged snapshot.
       // revision explicitly re-arms after closing results or rebuilding.
