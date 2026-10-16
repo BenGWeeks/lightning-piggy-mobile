@@ -96,13 +96,16 @@ beforeEach(async () => {
 });
 
 describe('sellerRelays', () => {
-  it('uses the write relays (wss only, deduped, capped) and falls back to defaults', () => {
+  it('reserves marketplace relays before secure write relays, dedupes and falls back to defaults', () => {
     const relays = Array.from({ length: 10 }, (_, i) => ({
       url: `wss://r${i}.example`,
       read: true,
       write: true,
     }));
-    expect(sellerRelays(relays)).toHaveLength(8);
+    expect(sellerRelays(relays)).toEqual([
+      ...MARKET_RELAYS,
+      ...relays.slice(0, 4).map((r) => r.url),
+    ]);
     expect(
       sellerRelays([
         { url: 'wss://w.example', read: false, write: true },
@@ -110,8 +113,8 @@ describe('sellerRelays', () => {
         { url: 'ws://insecure.example', read: false, write: true },
         { url: 'wss://read-only.example', read: true, write: false },
       ]),
-    ).toEqual(['wss://w.example']);
-    expect(sellerRelays([])).toEqual(['wss://default.example']);
+    ).toEqual([...MARKET_RELAYS, 'wss://w.example']);
+    expect(sellerRelays([])).toEqual([...MARKET_RELAYS, 'wss://default.example']);
   });
 });
 
@@ -123,17 +126,16 @@ describe('fetchSellerEvents', () => {
       new Uint8Array(32).fill(1),
     );
     const note = sign({ kind: 1, content: 'gm', tags: [] });
-    (querySyncAbortable as jest.Mock)
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([mine, theirs, note])
-      .mockResolvedValueOnce([]);
+    (querySyncAbortable as jest.Mock).mockImplementation((_pool, _relays, filter) =>
+      Promise.resolve(filter.kinds[0] === 30402 ? [mine, theirs, note] : []),
+    );
     await expect(fetchSellerEvents({ pubkey, relays: ['wss://r.example'] })).resolves.toEqual([
       mine,
     ]);
     const calls = (querySyncAbortable as jest.Mock).mock.calls;
     // Kind 5 is shared with other features: market deletions are their own
     // `#k`-filtered query so they can't crowd the shop or listings out.
-    expect(calls.map((c) => c[2])).toEqual([
+    expect(calls.filter((c) => c[1][0] === MARKET_RELAYS[0]).map((c) => c[2])).toEqual([
       { kinds: [30405, 30406], authors: [pubkey], limit: 100 },
       { kinds: [30402], authors: [pubkey], limit: 300 },
       { kinds: [5], authors: [pubkey], '#k': ['30402', '30406', '30405'], limit: 200 },
@@ -149,12 +151,120 @@ describe('fetchSellerEvents', () => {
   });
 
   it('fails on a relay timeout instead of returning an empty "no shop"', async () => {
-    (querySyncAbortable as jest.Mock)
-      .mockRejectedValueOnce(new Error('Relay query timed out before EOSE'))
-      .mockResolvedValue([]);
-    await expect(fetchSellerEvents({ pubkey, relays: ['wss://r.example'] })).rejects.toThrow(
-      'Only 0 of 1 relays answered',
+    (querySyncAbortable as jest.Mock).mockRejectedValue(
+      new Error('Relay query timed out before EOSE'),
     );
+    await expect(fetchSellerEvents({ pubkey, relays: ['wss://r.example'] })).rejects.toThrow(
+      'Only 0 of 5 relays answered',
+    );
+  });
+});
+
+describe('marketplace-only seller events', () => {
+  const writeRelays = ['wss://write.example'];
+
+  function serveMarketplace(events: Event[], source = MARKET_RELAYS[0]) {
+    (querySyncAbortable as jest.Mock).mockImplementation((_pool, relays, filter) =>
+      Promise.resolve(
+        relays[0] === source ? events.filter((event) => filter.kinds.includes(event.kind)) : [],
+      ),
+    );
+  }
+
+  it.each(MARKET_RELAYS)(
+    'recovers a save accepted only by %s on a fresh device',
+    async (source) => {
+      const saved = listing('marketplace-only');
+      (publishSignedEvent as jest.Mock).mockImplementation((...args: unknown[]) =>
+        jest.requireActual('./nostrEventPublish').publishSignedEvent(...args),
+      );
+      (pool.publish as jest.Mock).mockImplementation((targets: string[]) =>
+        targets.map((relay) =>
+          relay === source ? Promise.resolve('') : Promise.reject(new Error('blocked: refused')),
+        ),
+      );
+      await publishSellerEvent(saved, writeRelays);
+      resetSellerStore();
+      await expect(loadSellerCache(pubkey)).resolves.toEqual([]);
+      serveMarketplace([saved], source);
+      await expect(fetchSellerEvents({ pubkey, relays: writeRelays })).resolves.toEqual([saved]);
+      const publishedTargets = (publishSignedEvent as jest.Mock).mock.calls[0][1];
+      expect([
+        ...new Set((querySyncAbortable as jest.Mock).mock.calls.map((call) => call[1][0])),
+      ]).toEqual(publishedTargets);
+    },
+  );
+
+  it('detects a newer revision stored only on a marketplace relay', async () => {
+    const base = listing('edited', 100);
+    const newer = listing('edited', 200);
+    serveMarketplace([newer]);
+    const fetchLatest = () =>
+      fetchLatestRevision({
+        pubkey,
+        kind: 30402,
+        dTag: 'edited',
+        baseId: base.id,
+        relays: writeRelays,
+      });
+    await expect(fetchLatest()).resolves.toMatchObject({ event: newer });
+    await expect(resolveCurrentRevision({ fetchLatest, base })).rejects.toBeInstanceOf(
+      StaleRevisionError,
+    );
+  });
+
+  it.each(['a', 'e'])(
+    'detects marketplace-only %s deletions in snapshots and revision checks',
+    async (target) => {
+      const base = listing('deleted', 100);
+      const deletion = sign(
+        {
+          kind: 5,
+          content: '',
+          tags: [
+            [target, target === 'a' ? coordinateOf(30402, pubkey, 'deleted') : base.id],
+            ['k', '30402'],
+          ],
+        },
+        200,
+      );
+      (querySyncAbortable as jest.Mock).mockImplementation((_pool, relays, filter) =>
+        Promise.resolve(
+          filter.kinds[0] === 5 ? (relays[0] === MARKET_RELAYS[0] ? [deletion] : []) : [base],
+        ),
+      );
+      await expect(fetchSellerEvents({ pubkey, relays: writeRelays })).resolves.toContainEqual(
+        deletion,
+      );
+      const fetchLatest = () =>
+        fetchLatestRevision({
+          pubkey,
+          kind: 30402,
+          dTag: 'deleted',
+          baseId: base.id,
+          relays: writeRelays,
+        });
+      await expect(fetchLatest()).resolves.toMatchObject({ event: null });
+      await expect(resolveCurrentRevision({ fetchLatest, base })).rejects.toBeInstanceOf(
+        StaleRevisionError,
+      );
+    },
+  );
+
+  it('locks snapshot and revision reads to the requested test author', async () => {
+    (querySyncAbortable as jest.Mock).mockResolvedValue([]);
+    await fetchSellerEvents({ pubkey: TEST_ACCOUNT_KEYS.big, relays: writeRelays });
+    await fetchLatestRevision({
+      pubkey: TEST_ACCOUNT_KEYS.big,
+      kind: 30402,
+      dTag: 'test',
+      baseId: 'base',
+      relays: writeRelays,
+    });
+    expect(querySyncAbortable).toHaveBeenCalledTimes(6);
+    for (const call of (querySyncAbortable as jest.Mock).mock.calls) {
+      expect(call[1]).toEqual([TEST_RELAY_URL]);
+    }
   });
 });
 

@@ -32,10 +32,16 @@ const MAX_RELAYS = 8;
 const MAX_HIDDEN = 200;
 const SELLER_KINDS = [LISTING_KIND, COLLECTION_KIND, SHIPPING_OPTION_KIND, DELETION_KIND];
 
-/** The user's write relays (where their own events live), capped. */
+// Use the same bounded relay set for reads and writes: a successful save may
+// exist only on a marketplace relay. Explicit authors preserve test lockdown.
+function sellerEventRelays(relays: readonly string[], pubkey?: string): string[] {
+  return lockRelays([...new Set([...MARKET_RELAYS, ...relays])], pubkey).slice(0, MAX_RELAYS);
+}
+
+/** Marketplace relays plus the user's write relays (or defaults), capped. */
 export function sellerRelays(relays: readonly { url: string; write: boolean; read: boolean }[]) {
   const write = relays.filter((r) => r.write && /^wss:\/\//.test(r.url)).map((r) => r.url);
-  return [...new Set(write.length > 0 ? write : DEFAULT_RELAYS)].slice(0, MAX_RELAYS);
+  return sellerEventRelays(write.length > 0 ? write : DEFAULT_RELAYS);
 }
 
 /**
@@ -140,20 +146,17 @@ export async function fetchSellerEvents(input: {
   signal?: AbortSignal;
 }): Promise<Event[]> {
   const pubkey = input.pubkey.toLowerCase();
-  trackRelays(input.relays);
+  const relays = sellerEventRelays(input.relays, pubkey);
+  trackRelays(relays);
   const batches = await Promise.all([
     queryQuorum(
-      input.relays,
+      relays,
       { kinds: [COLLECTION_KIND, SHIPPING_OPTION_KIND], authors: [pubkey], limit: 100 },
       input.signal,
     ),
+    queryQuorum(relays, { kinds: [LISTING_KIND], authors: [pubkey], limit: 300 }, input.signal),
     queryQuorum(
-      input.relays,
-      { kinds: [LISTING_KIND], authors: [pubkey], limit: 300 },
-      input.signal,
-    ),
-    queryQuorum(
-      input.relays,
+      relays,
       {
         kinds: [DELETION_KIND],
         authors: [pubkey],
@@ -181,18 +184,19 @@ export async function fetchLatestRevision(input: {
   relays: string[];
 }): Promise<RevisionResult> {
   const pubkey = input.pubkey.toLowerCase();
-  trackRelays(input.relays);
+  const relays = sellerEventRelays(input.relays, pubkey);
+  trackRelays(relays);
   const coordinate = `${input.kind}:${pubkey}:${input.dTag}`;
   // The revisions plus any NIP-09 deletion of that address: a deleted shop
   // that some relays still serve is not "an existing shop".
   const [events, deletions] = await Promise.all([
-    queryQuorum(input.relays, {
+    queryQuorum(relays, {
       kinds: [input.kind],
       authors: [pubkey],
       '#d': [input.dTag],
       limit: 5,
     }),
-    queryQuorum(input.relays, {
+    queryQuorum(relays, {
       kinds: [DELETION_KIND],
       authors: [pubkey],
       '#a': [coordinate],
@@ -201,7 +205,7 @@ export async function fetchLatestRevision(input: {
   ]);
   const ids = [...new Set([...events.map((e) => e.id), ...(input.baseId ? [input.baseId] : [])])];
   const idDeletions = ids.length
-    ? await queryQuorum(input.relays, {
+    ? await queryQuorum(relays, {
         kinds: [DELETION_KIND],
         authors: [pubkey],
         '#e': ids,
@@ -239,10 +243,7 @@ export async function fetchLatestRevision(input: {
 export async function publishSellerEvent(signed: Event, relays: string[]): Promise<void> {
   // Reserve room for every marketplace relay before capping user write relays.
   // Lock by the signed author, even if the active account changed while signing.
-  const targets = lockRelays([...new Set([...MARKET_RELAYS, ...relays])], signed.pubkey).slice(
-    0,
-    MAX_RELAYS,
-  );
+  const targets = sellerEventRelays(relays, signed.pubkey);
   let timer: ReturnType<typeof setTimeout> | undefined;
   const deadline = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(new Error('Publishing timed out')), PUBLISH_TIMEOUT_MS);
