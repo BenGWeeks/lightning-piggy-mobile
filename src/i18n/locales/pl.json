@@ -2830,6 +2830,10 @@
       "alreadyPresent": "Już istnieje",
       "close": "Zamknij",
       "failed": "Ponowna publikacja nie powiodła się"
+    },
+    "shortcuts": {
+      "liked": "Polubione",
+      "startSelling": "Zacznij sprzedawać"
     }
   },
   "dmProtocol": {

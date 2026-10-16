@@ -2814,6 +2814,10 @@
       "alreadyPresent": "Ya está presente",
       "close": "Cerrar",
       "failed": "Error al republicar"
+    },
+    "shortcuts": {
+      "liked": "Me gusta",
+      "startSelling": "Empieza a vender"
     }
   },
   "dmProtocol": {

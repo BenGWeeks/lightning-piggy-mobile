@@ -2,6 +2,7 @@ import * as pacing from '../contexts/nostrDecryptPacing';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   clearMarketSnapshotMemory,
+  subscribeMarketSnapshots,
   getMarketSnapshot,
   loadedMarketSnapshots,
   readLoadedMarketSnapshots,
@@ -364,4 +365,24 @@ it('hydrates only the requested account and shares concurrent catalogue disk rea
   ]);
   expect(loadedMarketSnapshots(['catalogue-bob'])).toEqual([]);
   expect(AsyncStorage.getItem).toHaveBeenCalledTimes(1);
+});
+
+it('notifies local consumers after catalogue writes, hydration and account wipes', async () => {
+  const listener = jest.fn();
+  const unsubscribe = subscribeMarketSnapshots(listener);
+  try {
+    await writeMarketSnapshot('shortcut-account|scope', { products: [], incomplete: false });
+    expect(listener).toHaveBeenCalledTimes(1);
+    clearMarketSnapshotMemory();
+    expect(listener).toHaveBeenCalledTimes(2);
+    await readLoadedMarketSnapshots('shortcut-account');
+    expect(listener).toHaveBeenCalledTimes(3);
+    await wipeMarketAccount('shortcut-account');
+    expect(listener).toHaveBeenCalledTimes(4);
+    unsubscribe();
+    clearMarketSnapshotMemory();
+    expect(listener).toHaveBeenCalledTimes(4);
+  } finally {
+    unsubscribe();
+  }
 });

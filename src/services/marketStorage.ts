@@ -111,6 +111,14 @@ export interface MarketSnapshot {
   result: MarketListingsResult;
 }
 const memory = new Map<string, MarketSnapshot>();
+const snapshotListeners = new Set<() => void>();
+export function subscribeMarketSnapshots(listener: () => void) {
+  snapshotListeners.add(listener);
+  return () => {
+    snapshotListeners.delete(listener);
+  };
+}
+const notifySnapshots = () => snapshotListeners.forEach((listener) => listener());
 let diskQueue: Promise<void> = Promise.resolve();
 const valid = (snapshot: MarketSnapshot) =>
   snapshot &&
@@ -255,6 +263,7 @@ export function loadedMarketSnapshots(
 }
 export function clearMarketSnapshotMemory() {
   memory.clear();
+  notifySnapshots();
 }
 async function diskEntries(): Promise<MarketSnapshot[]> {
   try {
@@ -284,6 +293,7 @@ export async function readMarketSnapshot(key: string): Promise<MarketSnapshot | 
     const entries = bounded([snapshot, ...memory.values()]);
     memory.clear();
     for (const entry of entries) memory.set(entry.key, entry);
+    notifySnapshots();
   }
   return snapshot ? activeSnapshot(snapshot) : undefined;
 }
@@ -302,6 +312,7 @@ export function writeMarketSnapshot(key: string, result: MarketListingsResult): 
     ]);
     memory.clear();
     for (const entry of entries) memory.set(entry.key, entry);
+    notifySnapshots();
     const disk = await diskEntries();
     if (generation(account) !== epoch) return;
     const kept = bounded([snapshot, ...disk.filter((entry) => entry.key !== key)]);
@@ -322,6 +333,7 @@ export function wipeMarketAccount(account: string): Promise<void> {
   signedOut.add(account);
   generations.set(account, generation(account) + 1);
   for (const key of memory.keys()) if (snapshotAccount(key) === account) memory.delete(key);
+  notifySnapshots();
   const wipe = diskQueue.then(async () => {
     await AsyncStorage.removeItem(preferencesKey(account));
     await AsyncStorage.removeItem(checkoutCountryKey(account));
@@ -362,5 +374,6 @@ async function hydrateMarketCatalogue(account: string) {
   const retained = bounded([...memory.values()]);
   memory.clear();
   for (const entry of retained) memory.set(entry.key, entry);
+  notifySnapshots();
   return loadedMarketSnapshots([account]);
 }

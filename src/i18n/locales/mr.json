@@ -2814,6 +2814,10 @@
       "alreadyPresent": "आधीच उपलब्ध",
       "close": "बंद करा",
       "failed": "पुनर्प्रकाशन अयशस्वी"
+    },
+    "shortcuts": {
+      "liked": "आवडलेले",
+      "startSelling": "विक्री सुरू करा"
     }
   },
   "dmProtocol": {

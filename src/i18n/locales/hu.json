@@ -2814,6 +2814,10 @@
       "alreadyPresent": "Már létezik",
       "close": "Bezárás",
       "failed": "Sikertelen újraközzététel"
+    },
+    "shortcuts": {
+      "liked": "Kedveltek",
+      "startSelling": "Eladás indítása"
     }
   },
   "dmProtocol": {

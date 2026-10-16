@@ -1,4 +1,5 @@
 import { enabledAppRelays } from '../services/appRelayPrefs';
+import { MarketShortcutsProvider } from '../contexts/MarketShortcutsContext';
 import { useSellerActivityChecks } from '../hooks/useSellerActivityChecks';
 import { resolveActivityListing } from '../services/sellerActivityService';
 import { getCurrentUserReadRelays } from '../services/nostrActiveAccount';
@@ -697,37 +698,42 @@ function MainDrawer() {
   const drawerWidth = Math.min(Math.max(280, width * 0.65), 360);
 
   return (
-    <AccountDrawer.Navigator
-      initialRouteName="MainTabs"
-      drawerContent={(props) => <AccountDrawerContent {...props} />}
-      screenOptions={{
-        headerShown: false,
-        drawerType: 'front',
-        drawerPosition: 'right',
-        drawerStyle: { width: drawerWidth, backgroundColor: colors.surface },
-        swipeEdgeWidth: 32,
-      }}
-    >
-      <AccountDrawer.Screen name="MainTabs" component={HomeTabs} />
-      <AccountDrawer.Screen name="AccountProfile" component={ProfileScreen} />
-      <AccountDrawer.Screen name="AccountWallets" component={WalletsScreen} />
-      <AccountDrawer.Screen name="AccountAdvanced" component={AdvancedScreen} />
-      <AccountDrawer.Screen name="AccountNotificationServer" component={NotificationServerScreen} />
-      <AccountDrawer.Screen name="AccountBubbleStyle" component={BubbleStyleScreen} />
-      <AccountDrawer.Screen name="AccountProfiler" component={ProfilerScreen} />
-      <AccountDrawer.Screen name="AccountMessages" component={MessageSettingsScreen} />
-      <AccountDrawer.Screen name="AccountNostr" component={RelaySettingsNavigator} />
-      <AccountDrawer.Screen name="AccountInvitationKeys" component={InvitationKeysScreen} />
-      <AccountDrawer.Screen name="AccountOnChain" component={OnChainScreen} />
-      <AccountDrawer.Screen name="AccountDisplayLanguage" component={DisplayLanguageScreen} />
-      <AccountDrawer.Screen name="AccountCurrency" component={DisplayScreen} />
-      <AccountDrawer.Screen name="AccountShopAlerts" component={ShopAlertsScreen} />
-      <AccountDrawer.Screen name="AccountMutedAccounts" component={MutedAccountsScreen} />
-      <AccountDrawer.Screen name="AccountNotifications" component={NotificationSettingsScreen} />
-      <AccountDrawer.Screen name="AccountSecurity" component={SecurityScreen} />
-      <AccountDrawer.Screen name="AccountKeyBackup" component={KeyBackupScreen} />
-      <AccountDrawer.Screen name="AccountAbout" component={AboutScreen} />
-    </AccountDrawer.Navigator>
+    <MarketShortcutsProvider>
+      <AccountDrawer.Navigator
+        initialRouteName="MainTabs"
+        drawerContent={(props) => <AccountDrawerContent {...props} />}
+        screenOptions={{
+          headerShown: false,
+          drawerType: 'front',
+          drawerPosition: 'right',
+          drawerStyle: { width: drawerWidth, backgroundColor: colors.surface },
+          swipeEdgeWidth: 32,
+        }}
+      >
+        <AccountDrawer.Screen name="MainTabs" component={HomeTabs} />
+        <AccountDrawer.Screen name="AccountProfile" component={ProfileScreen} />
+        <AccountDrawer.Screen name="AccountWallets" component={WalletsScreen} />
+        <AccountDrawer.Screen name="AccountAdvanced" component={AdvancedScreen} />
+        <AccountDrawer.Screen
+          name="AccountNotificationServer"
+          component={NotificationServerScreen}
+        />
+        <AccountDrawer.Screen name="AccountBubbleStyle" component={BubbleStyleScreen} />
+        <AccountDrawer.Screen name="AccountProfiler" component={ProfilerScreen} />
+        <AccountDrawer.Screen name="AccountMessages" component={MessageSettingsScreen} />
+        <AccountDrawer.Screen name="AccountNostr" component={RelaySettingsNavigator} />
+        <AccountDrawer.Screen name="AccountInvitationKeys" component={InvitationKeysScreen} />
+        <AccountDrawer.Screen name="AccountOnChain" component={OnChainScreen} />
+        <AccountDrawer.Screen name="AccountDisplayLanguage" component={DisplayLanguageScreen} />
+        <AccountDrawer.Screen name="AccountCurrency" component={DisplayScreen} />
+        <AccountDrawer.Screen name="AccountShopAlerts" component={ShopAlertsScreen} />
+        <AccountDrawer.Screen name="AccountMutedAccounts" component={MutedAccountsScreen} />
+        <AccountDrawer.Screen name="AccountNotifications" component={NotificationSettingsScreen} />
+        <AccountDrawer.Screen name="AccountSecurity" component={SecurityScreen} />
+        <AccountDrawer.Screen name="AccountKeyBackup" component={KeyBackupScreen} />
+        <AccountDrawer.Screen name="AccountAbout" component={AboutScreen} />
+      </AccountDrawer.Navigator>
+    </MarketShortcutsProvider>
   );
 }
 

@@ -1844,3 +1844,10 @@ batch and its relay hints. Focus cleanup removes the reader; when the last
 reader of a batch leaves, both the initial lookup and seller reconciliation
 are aborted. Missing results keep the placeholder instead of a web-link-only
 unavailable state.
+
+== Market shortcut shows My shop with only expired cached listings (#1617)
+
+`loadedMarketSnapshots` can retain signed listings after their expiration.
+Apply `unexpiredMarketProducts` before checking cached listing ownership in
+`useKnownOwnListings`, as other cache consumers do. Regression coverage in
+`useKnownOwnListings.test.tsx` checks expired, active and non-expiring listings.
