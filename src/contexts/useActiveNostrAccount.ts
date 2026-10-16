@@ -1,3 +1,4 @@
+import { loadAppRelayPrefs } from '../services/appRelayPrefs';
 import { useCallback, useLayoutEffect, useState } from 'react';
 import { reviveBuyerOrderTitles } from '../services/buyerOrderTitles';
 import { setCurrentUserPubkey } from '../services/nostrActiveAccount';
@@ -7,7 +8,12 @@ import { setActivePubkeyForWalletStorage } from '../services/walletStorageServic
 export function useActiveNostrAccount() {
   const [pubkey, setPubkeyState] = useState<string | null>(null);
   const setPubkey = useCallback((pk: string | null) => {
-    if (pk) reviveBuyerOrderTitles(pk);
+    if (pk) {
+      reviveBuyerOrderTitles(pk);
+      void loadAppRelayPrefs(pk).catch(() => {
+        /* App defaults stay disabled if preferences cannot be read. */
+      });
+    }
     if (__DEV__) setCurrentUserPubkey(pk);
     setPubkeyState(pk);
   }, []);

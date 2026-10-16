@@ -1596,7 +1596,7 @@
     "nativeCryptoActiveYes": "Aktywne w tej sesji: tak",
     "nativeCryptoActiveNo": "Aktywne w tej sesji: nie",
     "notInUse": "Teraz nieużywane",
-    "advancedRelays": "Zaawansowane",
+    "advancedRelays": "Przekaźniki aplikacji",
     "defaultRelaysTitle": "Domyślne przekaźniki aplikacji",
     "defaultRelaysHint": "Wbudowane w aplikację i zawsze używane jako zapasowe obok twoich przekaźników.",
     "deviceRelaysTitle": "Przekaźniki tylko na urządzeniu",
@@ -3711,5 +3711,24 @@
     "sendNewInvoice": "Wyślij nową fakturę",
     "checkWalletFirst": "Najpierw sprawdź portfel",
     "unknownInvoiceWarning": "Nie udało się potwierdzić, czy poprzednia faktura została opłacona. Jeśli tak, nie wysyłaj nowej."
+  },
+  "relayPublishSheet": {
+    "waiting": "Oczekiwanie na podpis…",
+    "title": "Publikowanie: %{title}",
+    "accepted": "Zaakceptowano",
+    "rejected": "Odrzucono",
+    "noResponse": "Brak odpowiedzi",
+    "pending": "Publikowanie…"
+  },
+  "appRelays": {
+    "toggle": "Używaj %{host}",
+    "saveFailed": "Nie udało się zapisać ustawienia przekaźnika",
+    "warning": {
+      "default": "Zapasowe połączenia aplikacji są wyłączone",
+      "indexers": "Wyszukiwanie list przekaźników jest wyłączone",
+      "geocache": "Skrytki mogą się nie załadować",
+      "marmot": "Wyszukiwanie kluczy grup może nie działać",
+      "market": "Oferty na rynku nie będą się ładować"
+    }
   }
 }

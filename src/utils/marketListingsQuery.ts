@@ -1,3 +1,4 @@
+import { enabledAppRelays } from '../services/appRelayPrefs';
 import { isTestRelayLockdown, TEST_RELAY_URL } from '../config/testRelayLockdown';
 import { getCurrentUserPubkey } from '../services/nostrActiveAccount';
 // Relay plan for the market snapshots (author-scoped, or the All scope). Pure (no I/O) so the
@@ -55,7 +56,7 @@ export function marketSnapshotRelays(userRelays: readonly string[]): {
     return { urls: [TEST_RELAY_URL], dropped: false };
   const seen = new Set<string>();
   const all: string[] = [];
-  for (const raw of [...MARKET_RELAYS, ...userRelays]) {
+  for (const raw of [...enabledAppRelays('market', MARKET_RELAYS), ...userRelays]) {
     const url = normaliseRelay(raw);
     if (!/^wss:\/\/[^/\s]+/.test(url) || seen.has(url)) continue;
     seen.add(url);

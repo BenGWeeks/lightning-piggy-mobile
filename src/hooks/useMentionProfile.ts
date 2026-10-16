@@ -1,3 +1,4 @@
+import { enabledAppRelays } from '../services/appRelayPrefs';
 import { useCallback, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import { useNostr } from '../contexts/NostrContext';
@@ -18,7 +19,7 @@ export function useMentionProfile(pubkey: string) {
       setState({ pubkey, profile: peekMentionProfile(pubkey) });
       return subscribeMentionProfile(
         pubkey,
-        relayKey ? relayKey.split('|') : DEFAULT_RELAYS,
+        relayKey ? relayKey.split('|') : enabledAppRelays('default', DEFAULT_RELAYS),
         (profile) => setState({ pubkey, profile }),
       );
     }, [pubkey, relayKey]),

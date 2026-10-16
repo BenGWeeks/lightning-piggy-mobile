@@ -1,3 +1,4 @@
+import { enabledAppRelays } from '../../services/appRelayPrefs';
 import BrandedSpinner from '../../components/BrandedSpinner';
 import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, Image, Linking } from 'react-native';
@@ -76,7 +77,10 @@ const AboutScreen: React.FC = () => {
             await AsyncStorage.setItem(TEAM_PROFILE_CACHE_KEY, cached);
           }
         }
-        const fetched = await fetchProfile(decoded.data, DEFAULT_RELAYS);
+        const fetched = await fetchProfile(
+          decoded.data,
+          enabledAppRelays('default', DEFAULT_RELAYS),
+        );
         if (!cancelled && fetched) {
           setTeamProfile(fetched);
           await AsyncStorage.setItem(TEAM_PROFILE_CACHE_KEY, JSON.stringify(fetched));

@@ -1,3 +1,9 @@
+import {
+  APP_RELAY_PREFS_KEY,
+  enabledAppRelays,
+  loadAppRelayPrefs,
+  setAppRelayEnabled,
+} from '../services/appRelayPrefs';
 import * as SecureStore from 'expo-secure-store';
 import { checkoutAddressKey } from '../services/checkoutAddressStorage';
 import {
@@ -401,3 +407,16 @@ it('wipes seller invoices, receive wallet, buyer titles and order counters only 
 });
 
 beforeEach(() => resetSellerStore());
+
+it('wipes app relay preferences from storage and memory for only the removed account', async () => {
+  const removed = 'a'.repeat(64);
+  const retained = 'b'.repeat(64);
+  const url = 'wss://relay.example';
+  await setAppRelayEnabled(removed, 'market', url, false);
+  await setAppRelayEnabled(retained, 'market', url, false);
+  await wipeAccountCaches(removed);
+  expect(await AsyncStorage.getItem(perAccountKey(APP_RELAY_PREFS_KEY, removed))).toBeNull();
+  await loadAppRelayPrefs(removed);
+  expect(enabledAppRelays('market', [url], removed)).toEqual([url]);
+  expect(enabledAppRelays('market', [url], retained)).toEqual([]);
+});

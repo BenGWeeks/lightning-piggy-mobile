@@ -1,3 +1,4 @@
+import { enabledAppRelays } from '../services/appRelayPrefs';
 import { useEffect, useMemo, useState } from 'react';
 import { useNostr } from '../contexts/NostrContext';
 import { DEFAULT_RELAYS } from '../services/nostrService';
@@ -44,7 +45,9 @@ export function useEmbeddedEvent(ref: EmbedRef): {
     }
     setState({ key, result: undefined });
     let cancelled = false;
-    const readRelays = readRelaysKey ? readRelaysKey.split('|') : DEFAULT_RELAYS;
+    const readRelays = readRelaysKey
+      ? readRelaysKey.split('|')
+      : enabledAppRelays('default', DEFAULT_RELAYS);
     void resolveEmbed(ref, readRelays).then((result) => {
       if (!cancelled) setState({ key, result });
     });

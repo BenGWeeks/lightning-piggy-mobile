@@ -1,3 +1,4 @@
+import { enabledAppRelays } from '../services/appRelayPrefs';
 import { useCallback, useEffect, useMemo } from 'react';
 import { AppState } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
@@ -25,7 +26,9 @@ export function useSellerActivityChecks(mode: 'resume' | 'focus') {
   );
   const urls = useMemo(() => {
     const configured = relays.filter((r) => r.read || r.write).map((r) => r.url);
-    return [...new Set(configured.length ? configured : DEFAULT_RELAYS)].slice(0, 8);
+    return [
+      ...new Set(configured.length ? configured : enabledAppRelays('default', DEFAULT_RELAYS)),
+    ].slice(0, 8);
   }, [relays]);
   const check = useCallback(
     (signal: AbortSignal) => {

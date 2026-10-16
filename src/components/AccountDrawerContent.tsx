@@ -1,3 +1,4 @@
+import { enabledAppRelays } from '../services/appRelayPrefs';
 import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, TouchableOpacity } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -175,7 +176,10 @@ const AccountDrawerContent: React.FC<DrawerContentComponentProps> = (props) => {
 
       // Phase 2 — relay fan-out for identities still missing.
       const targetRelays = relays.filter((r) => r.read).map((r) => r.url);
-      const fanOut = targetRelays.length > 0 ? targetRelays : nostrService.DEFAULT_RELAYS;
+      const fanOut =
+        targetRelays.length > 0
+          ? targetRelays
+          : enabledAppRelays('default', nostrService.DEFAULT_RELAYS);
       for (const id of otherIdentities) {
         if (cancelled) return;
         if (seeded[id.pubkey] || profileById[id.pubkey]) continue;

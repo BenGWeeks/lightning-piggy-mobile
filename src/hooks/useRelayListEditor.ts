@@ -1,3 +1,6 @@
+import type { PublishProgress } from '../utils/relayPublishProgress';
+import { lockRelays } from '../config/testRelayLockdown';
+import { enabledAppRelays } from '../services/appRelayPrefs';
 import { isTestRelayLockdown, TEST_RELAY_URL } from '../config/testRelayLockdown';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Event } from 'nostr-tools';
@@ -98,7 +101,9 @@ export function useRelayListEditor() {
     latestCreatedAtRef.current = {};
     if (!pubkey) return;
     let cancelled = false;
-    const sources = [...new Set([...relayUrls, ...RELAY_LIST_INDEXERS])];
+    const sources = [
+      ...new Set([...relayUrls, ...enabledAppRelays('indexers', RELAY_LIST_INDEXERS)]),
+    ];
     setNip65Loading(true);
     setInboxLoading(true);
     void (async () => {
@@ -265,7 +270,9 @@ export function useRelayListEditor() {
 
   /** Sign, publish, and return the event as signed (so callers adopt exactly that). */
   const signAndPublish = useCallback(
-    async (unsigned: UnsignedEvent, targets: string[], pk: string) => {
+    async (unsigned: UnsignedEvent, targets: string[], pk: string, progress?: PublishProgress) => {
+      targets = [...new Set(lockRelays(targets, pk))];
+      progress?.({ targets });
       const signed = await signEvent(nextCreatedAt(unsigned));
       // Must be signed by the identity that started this publish, which must
       // still be the active one (no cross-account publish after a switch).
@@ -275,7 +282,10 @@ export function useRelayListEditor() {
         latestCreatedAtRef.current[signed.kind] ?? 0,
         signed.created_at,
       );
-      const results = await publishToRelays(signed as unknown as Event, targets);
+      progress?.({ signed: true });
+      const results = await publishToRelays(signed as unknown as Event, targets, 8000, (result) =>
+        progress?.({ result }),
+      );
       const outcome: RelayListPublishOutcome = results.some((r) => r.ok)
         ? { ok: true, results }
         : { ok: false, error: 'none-accepted', results };
@@ -284,109 +294,126 @@ export function useRelayListEditor() {
     [signEvent],
   );
 
-  const publishNip65 = useCallback(async (): Promise<RelayListPublishOutcome> => {
-    if (!pubkey || nip65Loading) return { ok: false, error: 'not-signed' };
-    if (publishing) return { ok: false, error: 'busy' };
-    const unsigned = buildRelayListEvent(nip65Draft);
-    if (unsigned.tags.length === 0) return { ok: false, error: 'empty' };
-    if (!unsigned.tags.some((t) => !t[2] || t[2] === 'write'))
-      return { ok: false, error: 'no-write' };
-    setPublishing('nip65');
-    try {
-      const {
-        outcome,
-        tags,
-        createdAt: signedAt,
-      } = await signAndPublish(
-        unsigned,
-        // Also the relays the app (and other clients) discover lists on, so
-        // any old copy there is replaced rather than later restored.
-        relayListPublishTargets(
-          [...nip65Relays.map((r) => r.url), ...relayUrls, ...DEFAULT_RELAYS],
-          nip65Draft.map((r) => r.url),
-        ),
-        pubkey,
-      );
-      if (outcome.ok && tags && activePubkeyRef.current === pubkey) {
-        // Adopt exactly what was signed (non-public rows were dropped).
-        const published = relayListFromTags(tags);
-        const result = await applyPublishedRelayList(pubkey, published, signedAt);
-        // Refused (a newer list exists, or the identity changed): keep the
-        // draft dirty and don't claim success.
-        if (!result.adopted) {
-          // A retry must be signed after the newer list the app holds.
-          raiseBaseline(10002, result.baseline);
-          return { ok: false, error: 'superseded', results: outcome.results };
+  const publishNip65 = useCallback(
+    async (progress?: PublishProgress): Promise<RelayListPublishOutcome> => {
+      if (!pubkey || nip65Loading) return { ok: false, error: 'not-signed' };
+      if (publishing) return { ok: false, error: 'busy' };
+      const unsigned = buildRelayListEvent(nip65Draft);
+      if (unsigned.tags.length === 0) return { ok: false, error: 'empty' };
+      if (!unsigned.tags.some((t) => !t[2] || t[2] === 'write'))
+        return { ok: false, error: 'no-write' };
+      setPublishing('nip65');
+      try {
+        const {
+          outcome,
+          tags,
+          createdAt: signedAt,
+        } = await signAndPublish(
+          unsigned,
+          // Also the relays the app (and other clients) discover lists on, so
+          // any old copy there is replaced rather than later restored.
+          relayListPublishTargets(
+            [
+              ...nip65Relays.map((r) => r.url),
+              ...relayUrls,
+              ...enabledAppRelays('default', DEFAULT_RELAYS),
+            ],
+            nip65Draft.map((r) => r.url),
+          ),
+          pubkey,
+          progress,
+        );
+        if (outcome.ok && tags && activePubkeyRef.current === pubkey) {
+          // Adopt exactly what was signed (non-public rows were dropped).
+          const published = relayListFromTags(tags);
+          const result = await applyPublishedRelayList(pubkey, published, signedAt);
+          // Refused (a newer list exists, or the identity changed): keep the
+          // draft dirty and don't claim success.
+          if (!result.adopted) {
+            // A retry must be signed after the newer list the app holds.
+            raiseBaseline(10002, result.baseline);
+            return { ok: false, error: 'superseded', results: outcome.results };
+          }
+          // The account switched while adopting: leave the successor's editor alone.
+          if (activePubkeyRef.current !== pubkey) return outcome;
+          setNip65Draft(published);
+          setNip65Dirty(false);
         }
-        // The account switched while adopting: leave the successor's editor alone.
-        if (activePubkeyRef.current !== pubkey) return outcome;
-        setNip65Draft(published);
-        setNip65Dirty(false);
+        return outcome;
+      } finally {
+        setPublishing(null);
       }
-      return outcome;
-    } finally {
-      setPublishing(null);
-    }
-  }, [
-    pubkey,
-    nip65Loading,
-    publishing,
-    relayUrls,
-    nip65Draft,
-    nip65Relays,
-    signAndPublish,
-    applyPublishedRelayList,
-  ]);
+    },
+    [
+      pubkey,
+      nip65Loading,
+      publishing,
+      relayUrls,
+      nip65Draft,
+      nip65Relays,
+      signAndPublish,
+      applyPublishedRelayList,
+    ],
+  );
 
-  const publishInbox = useCallback(async (): Promise<RelayListPublishOutcome> => {
-    if (!pubkey || inboxLoading) return { ok: false, error: 'not-signed' };
-    if (publishing) return { ok: false, error: 'busy' };
-    const unsigned = buildDmInboxEvent(inboxDraft);
-    if (unsigned.tags.length === 0) return { ok: false, error: 'empty' };
-    setPublishing('inbox');
-    try {
-      // Senders look up the inbox list on the user's NIP-65 write relays.
-      const writeRelays = nip65Relays.filter((r) => r.write).map((r) => r.url);
-      const {
-        outcome,
-        tags,
-        createdAt: signedAt,
-      } = await signAndPublish(
-        unsigned,
-        relayListPublishTargets(
-          [...inboxBaseline, ...writeRelays, ...relayUrls, ...DEFAULT_RELAYS],
-          inboxDraft,
-        ),
-        pubkey,
-      );
-      if (outcome.ok && tags && activePubkeyRef.current === pubkey) {
-        const published = dmInboxRelaysFromTags(tags);
-        // The app must now READ these relays, or DMs sent there are missed.
-        const result = await applyPublishedDmInbox(pubkey, published, signedAt);
-        if (!result.adopted) {
-          raiseBaseline(10050, result.baseline);
-          return { ok: false, error: 'superseded', results: outcome.results };
+  const publishInbox = useCallback(
+    async (progress?: PublishProgress): Promise<RelayListPublishOutcome> => {
+      if (!pubkey || inboxLoading) return { ok: false, error: 'not-signed' };
+      if (publishing) return { ok: false, error: 'busy' };
+      const unsigned = buildDmInboxEvent(inboxDraft);
+      if (unsigned.tags.length === 0) return { ok: false, error: 'empty' };
+      setPublishing('inbox');
+      try {
+        // Senders look up the inbox list on the user's NIP-65 write relays.
+        const writeRelays = nip65Relays.filter((r) => r.write).map((r) => r.url);
+        const {
+          outcome,
+          tags,
+          createdAt: signedAt,
+        } = await signAndPublish(
+          unsigned,
+          relayListPublishTargets(
+            [
+              ...inboxBaseline,
+              ...writeRelays,
+              ...relayUrls,
+              ...enabledAppRelays('default', DEFAULT_RELAYS),
+            ],
+            inboxDraft,
+          ),
+          pubkey,
+          progress,
+        );
+        if (outcome.ok && tags && activePubkeyRef.current === pubkey) {
+          const published = dmInboxRelaysFromTags(tags);
+          // The app must now READ these relays, or DMs sent there are missed.
+          const result = await applyPublishedDmInbox(pubkey, published, signedAt);
+          if (!result.adopted) {
+            raiseBaseline(10050, result.baseline);
+            return { ok: false, error: 'superseded', results: outcome.results };
+          }
+          if (activePubkeyRef.current !== pubkey) return outcome;
+          setInboxBaseline(published);
+          setInboxDraft(published);
+          setInboxDirty(false);
         }
-        if (activePubkeyRef.current !== pubkey) return outcome;
-        setInboxBaseline(published);
-        setInboxDraft(published);
-        setInboxDirty(false);
+        return outcome;
+      } finally {
+        setPublishing(null);
       }
-      return outcome;
-    } finally {
-      setPublishing(null);
-    }
-  }, [
-    pubkey,
-    inboxLoading,
-    publishing,
-    relayUrls,
-    inboxDraft,
-    inboxBaseline,
-    nip65Relays,
-    signAndPublish,
-    applyPublishedDmInbox,
-  ]);
+    },
+    [
+      pubkey,
+      inboxLoading,
+      publishing,
+      relayUrls,
+      inboxDraft,
+      inboxBaseline,
+      nip65Relays,
+      signAndPublish,
+      applyPublishedDmInbox,
+    ],
+  );
 
   return useMemo(
     () => ({

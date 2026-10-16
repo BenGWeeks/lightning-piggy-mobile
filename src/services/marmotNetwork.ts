@@ -1,3 +1,4 @@
+import { enabledAppRelays } from './appRelayPrefs';
 import {
   isTestRelayLockdown,
   TEST_PUSH_DISABLED,
@@ -94,7 +95,7 @@ export function createMarmotNetwork(
       ? [TEST_RELAY_URL]
       : cleaned.length > 0
         ? cleaned
-        : cleanRelays([...getFallbackRelays(), ...DEFAULT_RELAYS]);
+        : cleanRelays([...getFallbackRelays(), ...enabledAppRelays('default', DEFAULT_RELAYS)]);
   };
   const groupSubscribe = createGroupSubscriptionMux(
     (url, filters, next, onReqOpen, onClose) =>
@@ -251,7 +252,7 @@ export function createPushTransport(
     const relays = cleanRelays([
       ...MARMOT_PUSH_SERVER_RELAYS,
       ...getLookupRelays(),
-      ...DEFAULT_RELAYS,
+      ...enabledAppRelays('default', DEFAULT_RELAYS),
     ]);
     trackRelays(relays); // closed on sign-out like every other relay we open
     const events = await pool.querySync(

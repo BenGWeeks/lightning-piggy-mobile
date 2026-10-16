@@ -1596,7 +1596,7 @@
     "nativeCryptoActiveYes": "Ebben a munkamenetben aktív: igen",
     "nativeCryptoActiveNo": "Ebben a munkamenetben aktív: nem",
     "notInUse": "Jelenleg nincs használatban",
-    "advancedRelays": "Speciális",
+    "advancedRelays": "Alkalmazásrelayek",
     "defaultRelaysTitle": "Az alkalmazás alapértelmezett relay-ei",
     "defaultRelaysHint": "Az alkalmazásba beépítve, és a saját relay-eid mellett mindig tartaléknak használva.",
     "deviceRelaysTitle": "Csak az eszközön lévő relay-ek",
@@ -3657,5 +3657,24 @@
     "sendNewInvoice": "Új számla küldése",
     "checkWalletFirst": "Először ellenőrizd a tárcádat",
     "unknownInvoiceWarning": "Nem tudtuk megerősíteni, hogy az előző számlát kifizették-e. Ha igen, ne küldj újat."
+  },
+  "relayPublishSheet": {
+    "waiting": "Várakozás az aláíróra…",
+    "title": "%{title} közzététele",
+    "accepted": "Elfogadva",
+    "rejected": "Elutasítva",
+    "noResponse": "Nincs válasz",
+    "pending": "Közzététel…"
+  },
+  "appRelays": {
+    "toggle": "%{host} használata",
+    "saveFailed": "Nem sikerült menteni a relay beállítását",
+    "warning": {
+      "default": "Az alkalmazás tartalék kapcsolatai kikapcsolva",
+      "indexers": "A relaylisták keresése kikapcsolva",
+      "geocache": "Előfordulhat, hogy a geoládák nem töltődnek be",
+      "marmot": "Előfordulhat, hogy a csoportkulcsok nem találhatók",
+      "market": "A piactéri hirdetések nem töltődnek be"
+    }
   }
 }

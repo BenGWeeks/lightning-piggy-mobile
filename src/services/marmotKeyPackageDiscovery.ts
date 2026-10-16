@@ -1,3 +1,4 @@
+import { enabledAppRelays, loadAppRelayPrefs } from './appRelayPrefs';
 // Persist discovery receipts per account, so startup/resume never republishes
 // unchanged keys/lists. Upgrades copy the existing signed key to the new relays.
 import type { MarmotClient } from '@internet-privacy/marmot-ts';
@@ -47,6 +48,7 @@ async function maintainDiscovery(
   owner: string,
   opts: DiscoveryOptions,
 ): Promise<'published' | 'unchanged' | 'failed'> {
+  await loadAppRelayPrefs(owner);
   const relays = keyPackagePublishRelays(owner, opts.relays);
   if (opts.cancelled?.()) return 'failed';
   const outcome = await maintainKeyPackage(client.keyPackages, { ...opts, relays });
@@ -94,7 +96,7 @@ async function maintainDiscovery(
             ...cleanKeyPackageRelays(previousList ? (JSON.parse(previousList) as string[]) : []),
             ...cleanKeyPackageRelays(cached ? cached.tags.map((t) => t[1]) : []),
             ...pendingTargets,
-            ...RELAY_LIST_INDEXERS,
+            ...enabledAppRelays('indexers', RELAY_LIST_INDEXERS),
           ]),
         ];
     let signed = cached && pendingFingerprint === fingerprint ? cached : undefined;

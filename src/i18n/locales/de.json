@@ -1596,7 +1596,7 @@
     "nativeCryptoActiveYes": "In dieser Sitzung aktiv: ja",
     "nativeCryptoActiveNo": "In dieser Sitzung aktiv: nein",
     "notInUse": "Gerade nicht im Einsatz",
-    "advancedRelays": "Erweitert",
+    "advancedRelays": "App-Relays",
     "defaultRelaysTitle": "Standard-Relays der App",
     "defaultRelaysHint": "In die App eingebaut und immer als Ausweichlösung zusätzlich zu deinen Relays genutzt.",
     "deviceRelaysTitle": "Nur auf diesem Gerät",
@@ -3657,5 +3657,24 @@
     "sendNewInvoice": "Neue Rechnung senden",
     "checkWalletFirst": "Prüfe zuerst deine Wallet",
     "unknownInvoiceWarning": "Wir konnten nicht bestätigen, ob die vorherige Rechnung bezahlt wurde. Falls ja, sende keine neue."
+  },
+  "relayPublishSheet": {
+    "waiting": "Warten auf Signatur…",
+    "title": "Veröffentliche: %{title}",
+    "accepted": "Akzeptiert",
+    "rejected": "Abgelehnt",
+    "noResponse": "Keine Antwort",
+    "pending": "Wird veröffentlicht…"
+  },
+  "appRelays": {
+    "toggle": "%{host} verwenden",
+    "saveFailed": "Relay-Einstellung konnte nicht gespeichert werden",
+    "warning": {
+      "default": "App-Ersatzverbindungen sind aus",
+      "indexers": "Relay-Listen-Suche ist aus",
+      "geocache": "Geo-Caches werden möglicherweise nicht geladen",
+      "marmot": "Gruppenschlüssel werden möglicherweise nicht gefunden",
+      "market": "Marktangebote werden nicht geladen"
+    }
   }
 }

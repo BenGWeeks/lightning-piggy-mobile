@@ -1,3 +1,4 @@
+import { enabledAppRelays } from './appRelayPrefs';
 import { isTestRelayLockdown, TEST_RELAY_URL } from '../config/testRelayLockdown';
 import { MARMOT_KEY_PACKAGE_RELAYS, parseKeyPackageRelayList } from './marmotKeyPackageRelays';
 // Relay side of "Devices that can get new chats" (#1236): a bounded inventory
@@ -71,7 +72,13 @@ export async function loadInvitationKeys(
   const locked = isTestRelayLockdown(owner);
   const lookup = [
     ...new Set(
-      locked ? [TEST_RELAY_URL] : [...MARMOT_KEY_PACKAGE_RELAYS, ...relays, ...DEFAULT_RELAYS],
+      locked
+        ? [TEST_RELAY_URL]
+        : [
+            ...enabledAppRelays('marmot', MARMOT_KEY_PACKAGE_RELAYS),
+            ...relays,
+            ...enabledAppRelays('default', DEFAULT_RELAYS),
+          ],
     ),
   ]
     .filter(isRelayUrl)
@@ -89,7 +96,7 @@ export async function loadInvitationKeys(
     ? [TEST_RELAY_URL]
     : [
         ...new Set([
-          ...MARMOT_KEY_PACKAGE_RELAYS,
+          ...enabledAppRelays('marmot', MARMOT_KEY_PACKAGE_RELAYS),
           ...(keyList ? parseKeyPackageRelayList(keyList.tags) : []),
           ...(latest ? relayListFromTags(latest.tags).map((r) => r.url) : []),
           ...lookup,

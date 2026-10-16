@@ -1,3 +1,4 @@
+import { enabledAppRelays } from '../services/appRelayPrefs';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import type { Event as NostrEvent } from 'nostr-tools';
@@ -77,7 +78,7 @@ export function useProductComments(root: CommentRoot | null): UseProductComments
 
   const readRelays = useMemo(() => {
     const r = relays.filter((x) => x.read).map((x) => x.url);
-    return r.length > 0 ? r : DEFAULT_RELAYS;
+    return r.length > 0 ? r : enabledAppRelays('default', DEFAULT_RELAYS);
   }, [relays]);
 
   // Stable string identity for the root, so the effect re-runs only when the

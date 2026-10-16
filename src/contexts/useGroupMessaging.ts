@@ -1,3 +1,4 @@
+import { enabledAppRelays } from '../services/appRelayPrefs';
 import { marmotReplyTags } from '../services/marmotEdits';
 import { useCallback } from 'react';
 import * as nostrService from '../services/nostrService';
@@ -129,7 +130,9 @@ export function useGroupMessaging(options: UseGroupMessagingOptions): UseGroupMe
       const text = (input.text ?? '').trim();
       if (!input.file && !text) return { success: false, error: 'Empty message' };
       const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
-      const targetRelays = Array.from(new Set([...writeRelays, ...nostrService.DEFAULT_RELAYS]));
+      const targetRelays = Array.from(
+        new Set([...writeRelays, ...enabledAppRelays('default', nostrService.DEFAULT_RELAYS)]),
+      );
       try {
         // kind-15 encrypted file (voice note, #235) when a `file` is given;
         // otherwise the standard kind-14 group chat rumor.
@@ -301,7 +304,9 @@ export function useGroupMessaging(options: UseGroupMessagingOptions): UseGroupMe
     }): Promise<{ success: boolean; error?: string }> => {
       if (!pubkey || !isLoggedIn) return { success: false, error: 'Not logged in' };
       const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
-      const targetRelays = Array.from(new Set([...writeRelays, ...nostrService.DEFAULT_RELAYS]));
+      const targetRelays = Array.from(
+        new Set([...writeRelays, ...enabledAppRelays('default', nostrService.DEFAULT_RELAYS)]),
+      );
       try {
         const event = nostrService.createGroupStateEvent({
           groupId: input.groupId,

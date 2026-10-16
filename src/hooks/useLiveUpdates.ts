@@ -1,3 +1,4 @@
+import { enabledAppRelays } from '../services/appRelayPrefs';
 import { useEffect, useMemo, useSyncExternalStore } from 'react';
 import { decodeLivePingPayload, type LiveUpdateKey } from '../services/liveLocationService';
 import { decryptIncomingLivePing } from '../services/liveLocationPingReceive';
@@ -82,7 +83,10 @@ export function useLiveUpdateRelaySubscriptions(params: {
     const relayShares = shares.filter((s) => !s.marmot);
     if (!enabled || !myPubkey || relayShares.length === 0) return;
     const targetRelays = Array.from(
-      new Set([...relays.filter((r) => r.read).map((r) => r.url), ...DEFAULT_NOSTR_RELAYS]),
+      new Set([
+        ...relays.filter((r) => r.read).map((r) => r.url),
+        ...enabledAppRelays('default', DEFAULT_NOSTR_RELAYS),
+      ]),
     );
     const sinceFor = (list: WatchedShare[]) =>
       Math.floor(Math.min(...list.map((s) => s.startedAt)) / 1000) - 60;

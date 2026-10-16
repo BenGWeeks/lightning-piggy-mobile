@@ -1,3 +1,4 @@
+import { enabledAppRelays } from './appRelayPrefs';
 // Gift-wrap one unsigned NIP-17 rumor to one recipient and publish it, for the
 // signed-in identity's signer (nsec / Amber / NIP-46). Used by Market order
 // flows — the buyer's kind-16 order and the seller's payment request / status
@@ -63,7 +64,9 @@ export function canSendNip17(pubkey: string | null, signerType: string | null | 
 /** Write relays ∪ defaults (publish is Promise.any — one responsive relay suffices). */
 export function nip17TargetRelays(relays: Pick<RelayConfig, 'url' | 'write'>[]): string[] {
   const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
-  return Array.from(new Set([...writeRelays, ...nostrService.DEFAULT_RELAYS]));
+  return Array.from(
+    new Set([...writeRelays, ...enabledAppRelays('default', nostrService.DEFAULT_RELAYS)]),
+  );
 }
 
 /**

@@ -1,3 +1,6 @@
+import type { PublishProgress } from '../utils/relayPublishProgress';
+import { lockRelays } from '../config/testRelayLockdown';
+import { enabledAppRelays } from '../services/appRelayPrefs';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Event } from 'nostr-tools';
 import { useNostr } from '../contexts/NostrContext';
@@ -105,7 +108,11 @@ export function useBlossomServerList() {
         if (!cancelled) setServers([DEFAULT_BLOSSOM_SERVER]);
         if (!pubkey) return;
         const event = await fetchLatestReplaceable(pubkey, BLOSSOM_SERVER_LIST_KIND, [
-          ...new Set([...relayUrls, ...DEFAULT_RELAYS, ...RELAY_LIST_INDEXERS]),
+          ...new Set([
+            ...relayUrls,
+            ...enabledAppRelays('default', DEFAULT_RELAYS),
+            ...enabledAppRelays('indexers', RELAY_LIST_INDEXERS),
+          ]),
         ]).catch(() => null);
         if (event) noteCreatedAt(pubkey, event.created_at);
         const published = event ? blossomServersFromTags(event.tags) : [];
@@ -161,49 +168,71 @@ export function useBlossomServerList() {
     [editable, servers, update],
   );
 
-  const publish = useCallback(async (): Promise<BlossomPublishOutcome> => {
-    const pk = pubkey;
-    if (!pk) return { ok: false, error: 'not-signed' };
-    if (publishingRef.current) return { ok: false, error: 'busy' };
-    publishingRef.current = true;
-    const snapshot = servers;
-    setPublishing(true);
-    try {
-      // The newest list on the relays (another client, or a future-dated one).
-      const current = await fetchLatestReplaceable(pk, BLOSSOM_SERVER_LIST_KIND, [
-        ...new Set([...relayUrls, ...DEFAULT_RELAYS, ...RELAY_LIST_INDEXERS]),
-      ]).catch(() => null);
-      if (current) noteCreatedAt(pk, current.created_at);
-      noteCreatedAt(pk, await getBlossomServersCreatedAt(pk));
-      const unsigned = buildBlossomServerListEvent(snapshot);
-      // Never publish an empty list (e.g. only a legacy http:// server), which
-      // would replace an existing one with nothing.
-      if (unsigned.tags.length === 0) return { ok: false, error: 'no-valid-servers' };
-      unsigned.created_at = Math.max(
-        unsigned.created_at,
-        (latestCreatedAtRef.current.get(pk) ?? 0) + 1,
-      );
-      const signed = await signEvent(unsigned);
-      if (!signed || signed.pubkey !== pk || activePubkeyRef.current !== pk)
-        return { ok: false, error: 'not-signed' };
-      const targets = [...new Set([...relayUrls, ...DEFAULT_RELAYS, ...RELAY_LIST_INDEXERS])];
-      const results = await publishToRelays(signed as unknown as Event, targets);
-      const accepted = results.filter((r) => r.ok).length;
-      if (accepted === 0) return { ok: false, error: 'none-accepted', results };
-      noteCreatedAt(pk, unsigned.created_at);
-      // Record exactly what was published; a list edited meanwhile (here or in
-      // another screen instance) still differs from it, so stays publishable.
-      // What was actually signed (invalid entries are dropped from the event).
-      const sent = blossomServersFromTags(signed.tags);
-      await setPublishedBlossomServers(pk, sent);
-      // Only reflect it on screen if this is still the identity being shown.
-      if (mountedRef.current && activePubkeyRef.current === pk) setPublishedList(sent);
-      return { ok: true, accepted, total: results.length, results };
-    } finally {
-      publishingRef.current = false;
-      if (mountedRef.current) setPublishing(false);
-    }
-  }, [pubkey, servers, signEvent, relayUrls]);
+  const publish = useCallback(
+    async (progress?: PublishProgress): Promise<BlossomPublishOutcome> => {
+      const pk = pubkey;
+      if (!pk) return { ok: false, error: 'not-signed' };
+      if (publishingRef.current) return { ok: false, error: 'busy' };
+      publishingRef.current = true;
+      const snapshot = servers;
+      setPublishing(true);
+      const targets = [
+        ...new Set(
+          lockRelays(
+            [
+              ...relayUrls,
+              ...enabledAppRelays('default', DEFAULT_RELAYS),
+              ...enabledAppRelays('indexers', RELAY_LIST_INDEXERS),
+            ],
+            pk,
+          ),
+        ),
+      ];
+      progress?.({ targets });
+      try {
+        // The newest list on the relays (another client, or a future-dated one).
+        const current = await fetchLatestReplaceable(pk, BLOSSOM_SERVER_LIST_KIND, [
+          ...new Set([
+            ...relayUrls,
+            ...enabledAppRelays('default', DEFAULT_RELAYS),
+            ...enabledAppRelays('indexers', RELAY_LIST_INDEXERS),
+          ]),
+        ]).catch(() => null);
+        if (current) noteCreatedAt(pk, current.created_at);
+        noteCreatedAt(pk, await getBlossomServersCreatedAt(pk));
+        const unsigned = buildBlossomServerListEvent(snapshot);
+        // Never publish an empty list (e.g. only a legacy http:// server), which
+        // would replace an existing one with nothing.
+        if (unsigned.tags.length === 0) return { ok: false, error: 'no-valid-servers' };
+        unsigned.created_at = Math.max(
+          unsigned.created_at,
+          (latestCreatedAtRef.current.get(pk) ?? 0) + 1,
+        );
+        const signed = await signEvent(unsigned);
+        if (!signed || signed.pubkey !== pk || activePubkeyRef.current !== pk)
+          return { ok: false, error: 'not-signed' };
+        progress?.({ signed: true });
+        const results = await publishToRelays(signed as unknown as Event, targets, 8000, (result) =>
+          progress?.({ result }),
+        );
+        const accepted = results.filter((r) => r.ok).length;
+        if (accepted === 0) return { ok: false, error: 'none-accepted', results };
+        noteCreatedAt(pk, unsigned.created_at);
+        // Record exactly what was published; a list edited meanwhile (here or in
+        // another screen instance) still differs from it, so stays publishable.
+        // What was actually signed (invalid entries are dropped from the event).
+        const sent = blossomServersFromTags(signed.tags);
+        await setPublishedBlossomServers(pk, sent);
+        // Only reflect it on screen if this is still the identity being shown.
+        if (mountedRef.current && activePubkeyRef.current === pk) setPublishedList(sent);
+        return { ok: true, accepted, total: results.length, results };
+      } finally {
+        publishingRef.current = false;
+        if (mountedRef.current) setPublishing(false);
+      }
+    },
+    [pubkey, servers, signEvent, relayUrls],
+  );
 
   return {
     servers,
