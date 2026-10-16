@@ -142,6 +142,19 @@ export function stripJpegMetadata(bytes: Uint8Array): Uint8Array {
   return invalid();
 }
 
+// One lookup per byte keeps validation linear even for large IDAT chunks.
+const CRC_TABLE = Uint32Array.from({ length: 256 }, (_, value) => {
+  let crc = value;
+  for (let bit = 0; bit < 8; bit++) crc = crc & 1 ? (crc >>> 1) ^ 0xedb88320 : crc >>> 1;
+  return crc >>> 0;
+});
+
+function crc32(bytes: Uint8Array, start: number, end: number): number {
+  let crc = 0xffffffff;
+  for (let i = start; i < end; i++) crc = CRC_TABLE[(crc ^ bytes[i]) & 255] ^ (crc >>> 8);
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
 export function stripPngMetadata(bytes: Uint8Array): Uint8Array {
   if (text(bytes, 0, 8) !== '\x89PNG\r\n\x1a\n') invalid();
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -153,6 +166,7 @@ export function stripPngMetadata(bytes: Uint8Array): Uint8Array {
     const type = text(bytes, offset + 4, 4);
     const end = offset + 12 + size;
     if (end > bytes.length || (offset === 8 && (type !== 'IHDR' || size !== 13))) invalid();
+    if (view.getUint32(end - 4) !== crc32(bytes, offset + 4, end - 4)) invalid();
     if (!['eXIf', 'tEXt', 'iTXt', 'zTXt', 'tIME'].includes(type)) {
       parts.push(bytes.subarray(offset, end));
     }

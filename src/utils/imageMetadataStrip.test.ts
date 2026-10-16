@@ -45,8 +45,13 @@ function pngChunk(type: string, payload: number[]) {
   new DataView(result.buffer).setUint32(0, payload.length);
   result.set(ascii(type), 4);
   result.set(payload, 8);
-  // CRC bytes are opaque to the stripper and retained verbatim.
-  result.set([1, 2, 3, 4], result.length - 4);
+  // Independent bit-at-a-time fixture CRC (production uses a lookup table).
+  let crc = 0xffffffff;
+  for (const byte of result.subarray(4, result.length - 4)) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit++) crc = crc & 1 ? (crc >>> 1) ^ 0xedb88320 : crc >>> 1;
+  }
+  new DataView(result.buffer).setUint32(result.length - 4, (crc ^ 0xffffffff) >>> 0);
   return result;
 }
 const signature = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
@@ -187,4 +192,12 @@ it.each([
   ['photo.jpg.pdf', false],
 ])('recognizes the final image extension in %s', (name, expected) => {
   expect(hasImageFilename(name)).toBe(expected);
+});
+
+it('rejects a PNG with a corrupt IDAT CRC for native fallback', () => {
+  const corruptIdat = idat.slice();
+  corruptIdat[corruptIdat.length - 1] ^= 1;
+  expect(() => stripPngMetadata(bytes(signature, ihdr, corruptIdat, iend))).toThrow();
+  // Standard empty IEND CRC independently checks the fixture CRC generator.
+  expect([...iend.subarray(8)]).toEqual([0xae, 0x42, 0x60, 0x82]);
 });

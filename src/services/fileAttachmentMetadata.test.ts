@@ -104,3 +104,22 @@ it.each(['photo.tiff', 'photo.dng', 'photo.jpg', 'drawing.svg'])(
     expect(strip).toHaveBeenCalledWith('file:///opaque', 'R1BT', { preserveGif: false });
   },
 );
+
+it('re-encodes a PNG with a corrupt chunk CRC instead of uploading those bytes', async () => {
+  const png = Buffer.alloc(8 + 25);
+  Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).copy(png);
+  png.writeUInt32BE(13, 8);
+  png.write('IHDR', 12);
+  // All-zero CRC is invalid for this IHDR; its bounds are otherwise complete.
+  strip.mockResolvedValue({ uri: 'file:///clean.png', base64: 'Y2xlYW4=' });
+  const result = await prepareFileAttachment(
+    'file:///bad.png',
+    png.toString('base64'),
+    'image/png',
+    'bad.png',
+  );
+  expect(strip).toHaveBeenCalledWith('file:///bad.png', png.toString('base64'), {
+    preserveGif: false,
+  });
+  expect(result.base64).toBe('Y2xlYW4=');
+});

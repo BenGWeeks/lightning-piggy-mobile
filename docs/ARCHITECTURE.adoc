@@ -461,7 +461,7 @@ generic. Generic-MIME files with image extensions also require sanitization.
 JPEG drops APP1 (EXIF/XMP), APP13 (IPTC) and COM while preserving compressed
 image data, JFIF, ICC and Adobe segments. A fresh EXIF segment contains only a
 valid IFD0 Orientation, with no GPS pointers or thumbnail. PNG drops eXIf,
-tEXt, iTXt, zTXt and tIME; WebP drops EXIF/XMP and updates RIFF size and VP8X
+tEXt, iTXt, zTXt and tIME after validating chunk CRCs; WebP drops EXIF/XMP and updates RIFF size and VP8X
 flags. Both retain image chunks verbatim. Unsupported images (including HEIC)
 and malformed streams use native metadata-stripping re-encoding; failure aborts
 the send. Re-encoded files use the output MIME and extension. This fallback
