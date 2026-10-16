@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
-import { rearmBackgroundDmWatchForActiveIdentity } from './backgroundDmService';
+import { syncBackgroundDmWatchFromPreference } from './backgroundDmService';
 import { setCurrentUserPubkey } from './nostrActiveAccount';
 import { TEST_ACCOUNT_PUBKEYS, TEST_RELAY_URL } from '../config/testRelayLockdown';
 import { perAccountKey } from './perAccountStorage';
@@ -16,7 +16,7 @@ import {
 } from './appRelayPrefs';
 
 jest.mock('./backgroundDmService', () => ({
-  rearmBackgroundDmWatchForActiveIdentity: jest.fn().mockResolvedValue(undefined),
+  syncBackgroundDmWatchFromPreference: jest.fn().mockResolvedValue(undefined),
 }));
 
 const alice = 'a'.repeat(64);
@@ -28,7 +28,7 @@ beforeEach(async () => {
   await forgetAppRelayPrefs(bob);
   await AsyncStorage.clear();
   jest.replaceProperty(Platform, 'OS', 'android');
-  jest.mocked(rearmBackgroundDmWatchForActiveIdentity).mockClear();
+  jest.mocked(syncBackgroundDmWatchFromPreference).mockClear();
 });
 afterEach(() => jest.restoreAllMocks());
 
@@ -98,11 +98,11 @@ it('preserves the list identity when no filtering is needed', async () => {
   expect(enabledAppRelays('default', relays, alice)).toBe(relays);
 });
 
-it('re-arms the background watch with persisted default preferences on disable and enable', async () => {
+it('syncs the background watch with persisted default preferences on disable and enable', async () => {
   setCurrentUserPubkey(alice);
   const observed: string[][] = [];
   const persisted: string[][] = [];
-  jest.mocked(rearmBackgroundDmWatchForActiveIdentity).mockImplementation(async () => {
+  jest.mocked(syncBackgroundDmWatchFromPreference).mockImplementation(async () => {
     observed.push([...enabledAppRelays('default', relays, alice)]);
     const stored = JSON.parse(
       (await AsyncStorage.getItem(perAccountKey(APP_RELAY_PREFS_KEY, alice)))!,
@@ -113,10 +113,10 @@ it('re-arms the background watch with persisted default preferences on disable a
   await setAppRelayEnabled(alice, 'default', relays[0], true);
   expect(observed).toEqual([[relays[1]], relays]);
   expect(persisted).toEqual([[relays[0]], []]);
-  jest.mocked(rearmBackgroundDmWatchForActiveIdentity).mockResolvedValue(undefined);
+  jest.mocked(syncBackgroundDmWatchFromPreference).mockResolvedValue(undefined);
 });
 
-it('does not re-arm for other groups, inactive accounts, or iOS', async () => {
+it('does not sync for other groups, inactive accounts, or iOS', async () => {
   setCurrentUserPubkey(alice);
   for (const group of ['indexers', 'geocache', 'marmot', 'market'] as const) {
     await setAppRelayEnabled(alice, group, relays[0], false);
@@ -124,10 +124,10 @@ it('does not re-arm for other groups, inactive accounts, or iOS', async () => {
   await setAppRelayEnabled(bob, 'default', relays[0], false);
   jest.replaceProperty(Platform, 'OS', 'ios');
   await setAppRelayEnabled(alice, 'default', relays[0], false);
-  expect(rearmBackgroundDmWatchForActiveIdentity).not.toHaveBeenCalled();
+  expect(syncBackgroundDmWatchFromPreference).not.toHaveBeenCalled();
 });
 
-it('does not re-arm or change the live plan when persistence fails', async () => {
+it('does not sync or change the live plan when persistence fails', async () => {
   setCurrentUserPubkey(alice);
   await loadAppRelayPrefs(alice);
   jest.spyOn(AsyncStorage, 'setItem').mockRejectedValueOnce(new Error('storage failed'));
@@ -135,5 +135,5 @@ it('does not re-arm or change the live plan when persistence fails', async () =>
     'storage failed',
   );
   expect(enabledAppRelays('default', relays, alice)).toEqual(relays);
-  expect(rearmBackgroundDmWatchForActiveIdentity).not.toHaveBeenCalled();
+  expect(syncBackgroundDmWatchFromPreference).not.toHaveBeenCalled();
 });

@@ -106,14 +106,15 @@ export function setAppRelayEnabled(
         getCurrentUserPubkey()?.toLowerCase() === pubkey
       ) {
         // Load lazily: the background watch itself reads this preference store.
-        // Re-arm only after persistence so its relay resolution sees the new set.
+        // Sync after persistence to refresh live relays or restart a stopped host
+        // when the watch preference is enabled.
         try {
-          const { rearmBackgroundDmWatchForActiveIdentity } =
+          const { syncBackgroundDmWatchFromPreference } =
             // eslint-disable-next-line @typescript-eslint/no-require-imports -- Avoid the watch/store import cycle.
             require('./backgroundDmService') as typeof import('./backgroundDmService');
-          await rearmBackgroundDmWatchForActiveIdentity();
+          await syncBackgroundDmWatchFromPreference();
         } catch (error) {
-          console.warn('[AppRelayPrefs] background DM re-arm failed:', error);
+          console.warn('[AppRelayPrefs] background DM sync failed:', error);
         }
       }
     });
