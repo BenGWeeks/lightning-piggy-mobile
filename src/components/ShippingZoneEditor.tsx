@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity } from 'react-native';
 import { ChevronDown, ChevronUp, Plus, Trash2, X } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
@@ -8,6 +8,7 @@ import {
   SHIPPING_REGION_PRESETS,
   type ShippingRegionPreset,
   type ShippingZoneDraft,
+  validateZone,
 } from '../utils/marketSellerEvents';
 import type { MarketSellerStyles } from '../styles/MarketSeller.styles';
 
@@ -56,10 +57,17 @@ const ShippingZoneEditor: React.FC<Props> = ({
   // A zone that exactly matches a preset shows just the highlighted preset;
   // anything else lists its countries (EU alone would be 27 chips).
   const matchedPreset = PRESETS.find((p) => sameSet(zone.countries, SHIPPING_REGION_PRESETS[p.id]));
-  const nameError = showErrors && !zone.name.trim();
-  const costError = showErrors && !/^\d+([.,]\d+)?$/.test(zone.cost.trim());
+  const zoneErrors = showErrors ? validateZone(zone) : [];
+  const nameError = zoneErrors.includes('zoneName');
+  const costError = zoneErrors.includes('zoneCost');
+  const hasError = zoneErrors.length > 0;
   const [open, setOpen] = useState(initiallyOpen);
-  const expanded = open || nameError || costError;
+  // Latch open once an error shows, so fixing it doesn't collapse the card
+  // (and unmount the input) mid-typing.
+  useEffect(() => {
+    if (hasError) setOpen(true);
+  }, [hasError]);
+  const expanded = open || hasError;
   const Chevron = expanded ? ChevronUp : ChevronDown;
   const shipsTo = matchedPreset
     ? t(matchedPreset.labelKey)

@@ -69,3 +69,25 @@ it('opens a newly added zone, and any zone with errors once save is attempted', 
   expect(invalid.getByTestId('shop-zone-name-0')).toBeTruthy();
   expect(invalid.getByText('market.sell.zone.untitled')).toBeTruthy();
 });
+
+it('stays open while an error is being fixed', () => {
+  const screen = renderZone({ zone: { ...zone, name: '' }, showErrors: true });
+  screen.rerender(
+    <ShippingZoneEditor
+      zone={{ ...zone, name: 'R' }}
+      index={0}
+      currency="GBP"
+      showErrors
+      styles={styles}
+      onChange={jest.fn()}
+      onRemove={jest.fn()}
+      onAddCountry={jest.fn()}
+    />,
+  );
+  expect(screen.getByTestId('shop-zone-name-0')).toBeTruthy();
+});
+
+it('opens for a cost Save would reject, such as fractional sats', () => {
+  const screen = renderZone({ zone: { ...zone, cost: '1.5', currency: 'SATS' }, showErrors: true });
+  expect(screen.getByTestId('shop-zone-cost-0')).toBeTruthy();
+});
