@@ -43,7 +43,7 @@ describe('marketSnapshotRelays', () => {
       ...user,
     ]);
     expect(urls).toHaveLength(MAX_SNAPSHOT_RELAYS);
-    expect(urls.slice(0, 2)).toEqual(MARKET_RELAYS);
+    expect(urls.slice(0, MARKET_RELAYS.length)).toEqual(MARKET_RELAYS);
     expect(urls.some((u) => !u.startsWith('wss://'))).toBe(false);
     expect(dropped).toBe(true);
   });

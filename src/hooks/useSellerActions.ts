@@ -57,7 +57,7 @@ export interface ShopBase {
 /**
  * Sign + publish the seller's Gamma Markets events through the app's signer
  * abstraction (`useNostr().signEvent` — nsec, Amber or NIP-46) to the user's
- * write relays, and drop each signed event straight into the shared store.
+ * write and marketplace relays, and drop each signed event into the shared store.
  *
  * Every edit first fetches the CURRENT revision (fail closed) so a cached or
  * stale form can't silently overwrite newer data published elsewhere.

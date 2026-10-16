@@ -1579,6 +1579,8 @@
     "geoCacheRelaysHint": "Eigene Relays für Piglets und andere Geocaches (NIP-GC). Sie spiegeln, was die Web-App treasures.to liest und durchsucht, damit deine Piglets im Web auffindbar bleiben. Sie werden zusätzlich zu allen oben hinzugefügten Relays immer zum Veröffentlichen und Lesen von Geocaches verwendet.",
     "marmotRelays": "Relays für Gruppenchats (Marmot)",
     "marmotRelaysHint": "Bekannte Relays für Marmot-Gruppenchats, gemeinsam mit White Noise genutzt. Deine Einladungsschlüssel (Schlüsselpakete) werden hier und auf deinen eigenen Relays veröffentlicht. So können andere einen verschlüsselten Gruppenchat mit dir starten, auch wenn deine Relays offline sind. Sie werden in deiner Relay-Liste für Schlüsselpakete (Kind 10051) bekannt gegeben.",
+    "marketRelays": "Marktplatz-Relays (Gamma)",
+    "marketRelaysHint": "Relays, von denen Lightning Piggy Marktangebote liest und auf denen deine Shop-Angebote veröffentlicht werden, gemeinsam genutzt mit anderen Gamma Markets-Apps (Plebeian, Conduit, Shopstr).",
     "encryptedMessages": "Verschlüsselte Nachrichten (NIP-17)",
     "amberPermissionHint": "Amber hat dieser App noch keine NIP-44-Entschlüsselungsberechtigung erteilt – tippe unten, um sie zu erteilen. Ein Dialog, danach werden weitere verschlüsselte Nachrichten still entschlüsselt. Nachrichten von Personen, denen du nicht folgst, bleiben in jedem Fall verborgen.",
     "amberPermissionTitle": "Amber-Berechtigung",

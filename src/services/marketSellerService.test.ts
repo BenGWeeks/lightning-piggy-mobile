@@ -1,3 +1,6 @@
+import { TEST_ACCOUNT_KEYS } from '../utils/testAccounts';
+import { TEST_RELAY_URL } from '../config/testRelayLockdown';
+import { MARKET_RELAYS } from '../utils/marketListingsQuery';
 import { buildShopTemplate } from '../utils/marketSellerTestFixtures';
 import { resolveCurrentRevision, StaleRevisionError } from '../utils/marketSellerRevision';
 import { nostrVerifyEvent } from './nostrCrypto';
@@ -300,11 +303,33 @@ describe('publishSellerEvent', () => {
     expect(published).toBe(true);
   });
 
+  it.each([30402, 30406, 30405, 5])(
+    'publishes kind %i to all marketplace relays and deduplicated write relays',
+    async (kind) => {
+      (publishSignedEvent as jest.Mock).mockResolvedValue(undefined);
+      const event = sign({ kind, content: '', tags: [['d', 'test']] });
+      await publishSellerEvent(event, ['wss://write.example', ...MARKET_RELAYS]);
+      expect(publishSignedEvent).toHaveBeenCalledWith(event, [
+        ...MARKET_RELAYS,
+        'wss://write.example',
+      ]);
+    },
+  );
+
+  it('locks publication by the signed author to the test relay', async () => {
+    (publishSignedEvent as jest.Mock).mockResolvedValue(undefined);
+    const event = { ...listing('a'), pubkey: TEST_ACCOUNT_KEYS.big };
+    await publishSellerEvent(event, ['wss://write.example', ...MARKET_RELAYS]);
+    expect(publishSignedEvent).toHaveBeenCalledWith(event, [TEST_RELAY_URL]);
+  });
+
   it('publishes to at most eight relays', async () => {
     (publishSignedEvent as jest.Mock).mockResolvedValue(undefined);
     const relays = Array.from({ length: 12 }, (_, i) => `wss://r${i}.example`);
     await publishSellerEvent(listing('a'), relays);
-    expect((publishSignedEvent as jest.Mock).mock.calls[0][1]).toHaveLength(8);
+    const targets = (publishSignedEvent as jest.Mock).mock.calls[0][1];
+    expect(targets).toHaveLength(8);
+    expect(targets.slice(0, MARKET_RELAYS.length)).toEqual(MARKET_RELAYS);
   });
   it('rejects when no relay accepts in time', async () => {
     jest.useFakeTimers();

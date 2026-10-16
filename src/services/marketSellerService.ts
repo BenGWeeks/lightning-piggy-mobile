@@ -1,6 +1,8 @@
 // Relay I/O for the seller side of the Market (#1273): fetch the user's own
 // Gamma Markets events and publish newly signed ones. Thin shell over the
 // pure builders/reducer in utils/marketSeller*.
+import { lockRelays } from '../config/testRelayLockdown';
+import { MARKET_RELAYS } from '../utils/marketListingsQuery';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Event, Filter } from 'nostr-tools';
 import { trackRelays, DEFAULT_RELAYS, publishSignedEvent } from './nostrService';
@@ -232,15 +234,21 @@ export async function fetchLatestRevision(input: {
   return { event: newest, deletedAt, deletedIds: [...deletedIds] };
 }
 
-/** Publish to the seller's relays; resolves once ONE relay accepts, rejects
+/** Publish to marketplace and seller relays; resolves once ONE relay accepts, rejects
  * if none do within the deadline. */
 export async function publishSellerEvent(signed: Event, relays: string[]): Promise<void> {
+  // Reserve room for every marketplace relay before capping user write relays.
+  // Lock by the signed author, even if the active account changed while signing.
+  const targets = lockRelays([...new Set([...MARKET_RELAYS, ...relays])], signed.pubkey).slice(
+    0,
+    MAX_RELAYS,
+  );
   let timer: ReturnType<typeof setTimeout> | undefined;
   const deadline = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(new Error('Publishing timed out')), PUBLISH_TIMEOUT_MS);
   });
   try {
-    await Promise.race([publishSignedEvent(signed, relays.slice(0, MAX_RELAYS)), deadline]);
+    await Promise.race([publishSignedEvent(signed, targets), deadline]);
   } finally {
     if (timer) clearTimeout(timer);
   }

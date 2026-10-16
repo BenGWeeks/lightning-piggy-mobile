@@ -6,6 +6,7 @@ import { ChevronDown, ChevronUp, Trash2 } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { DEFAULT_RELAYS } from '../services/nostrService';
+import { MARKET_RELAYS } from '../utils/marketListingsQuery';
 import { GC_RELAYS } from '../services/geocacheRelays';
 import { MARMOT_KEY_PACKAGE_RELAYS } from '../services/marmotKeyPackageRelays';
 import { createAdvancedRelaysSectionStyles } from '../styles/AdvancedRelaysSection.styles';
@@ -27,7 +28,7 @@ interface Props {
 
 /**
  * Relays the app uses that aren't the user's own published lists (#1148):
- * the built-in fallbacks, geo-cache and Marmot sets, and any legacy device-only
+ * the built-in fallbacks, geo-cache, Marmot and marketplace sets, and legacy device-only
  * additions. Collapsed by default — most people never need it.
  */
 export default function AdvancedRelaysSection({
@@ -106,6 +107,13 @@ export default function AdvancedRelaysSection({
             testID="marmotRelays"
           />
           {readOnlyList(MARMOT_KEY_PACKAGE_RELAYS, 'marmot-relay-list')}
+
+          <NetworkSectionHeading
+            title={t('nostrScreen.marketRelays')}
+            explanation={t('nostrScreen.marketRelaysHint')}
+            testID="marketRelays"
+          />
+          {readOnlyList(MARKET_RELAYS, 'market-relay-list')}
 
           {deviceRelays.length > 0 && (
             <>
