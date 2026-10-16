@@ -248,3 +248,19 @@ it('retries a cached miss after relay plan changes while retaining positive cach
   await settle(resolveEmbed(eventRef(id('3')), ['wss://other'], undefined, true));
   expect(mockQuery).toHaveBeenCalledTimes(count);
 });
+
+it('drops previous read relays for uncached and retried embeds when the plan becomes empty', async () => {
+  mockQuery.mockResolvedValue([]);
+  await settle(resolveEmbed(eventRef(id('1')), ['wss://disabled']));
+  mockQuery.mockClear();
+
+  expect(await settle(resolveEmbed(eventRef(id('2')), []))).toEqual({ event: null });
+  expect(await settle(resolveEmbed(eventRef(id('1')), [], undefined, true))).toEqual({
+    event: null,
+  });
+  expect(mockQuery).not.toHaveBeenCalled();
+
+  await settle(resolveEmbed(eventRef(id('3'), ['wss://hint']), []));
+  expect(mockQuery).toHaveBeenCalledTimes(1);
+  expect(mockQuery.mock.calls[0][1]).toEqual(['wss://hint']);
+});

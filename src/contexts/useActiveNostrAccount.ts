@@ -5,7 +5,7 @@ import { setCurrentUserPubkey } from '../services/nostrActiveAccount';
 import { setActivePubkeyForWalletStorage } from '../services/walletStorageService';
 
 /** Own active identity and its synchronous DEV relay-routing mirror. */
-export function useActiveNostrAccount() {
+export function useActiveNostrAccount(onRelayPrefsRecovered?: (pk: string) => Promise<unknown>) {
   const [pubkey, setPubkeyState] = useState<string | null>(null);
   const setPubkey = useCallback((pk: string | null) => {
     if (pk) {
@@ -22,18 +22,28 @@ export function useActiveNostrAccount() {
   useEffect(() => {
     if (!pubkey) return;
     let cancelled = false;
+    let failed = false;
     let retry: ReturnType<typeof setTimeout> | undefined;
     const hydrate = () => {
-      void loadAppRelayPrefs(pubkey).catch(() => {
-        if (!cancelled) retry = setTimeout(hydrate, 3000);
-      });
+      void loadAppRelayPrefs(pubkey)
+        .then(() => {
+          // Startup discovery may have run with defaults closed on the failed read.
+          if (!cancelled && failed)
+            void onRelayPrefsRecovered?.(pubkey).catch((error) => {
+              console.warn('[Nostr] relay discovery after preference recovery failed:', error);
+            });
+        })
+        .catch(() => {
+          failed = true;
+          if (!cancelled) retry = setTimeout(hydrate, 3000);
+        });
     };
     hydrate();
     return () => {
       cancelled = true;
       clearTimeout(retry);
     };
-  }, [pubkey]);
+  }, [pubkey, onRelayPrefsRecovered]);
   // Release builds retain the existing before-paint publication timing.
   useLayoutEffect(() => {
     setCurrentUserPubkey(pubkey);

@@ -111,7 +111,7 @@ export function resolveEmbed(
     const promise = new Promise<EmbedResult>((r) => (resolve = r));
     item = { ref, resolve, promise, consumers: new Set() };
     queue.set(key, item);
-    if (readRelays.length > 0) batchRelays = [...readRelays];
+    batchRelays = [...readRelays];
     if (!timer) timer = setTimeout(flush, BATCH_MS);
   }
   const pending = item;

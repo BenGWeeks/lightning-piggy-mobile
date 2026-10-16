@@ -307,8 +307,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
-  // App defaults are filtered per account; personal NIP-65 and device
-  // choices keep precedence when they name the same relay.
+  // App defaults are per-account; personal NIP-65 and device choices keep precedence.
   const {
     nip65Relays,
     dmInboxRelays,
@@ -319,7 +318,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     applyPublishedRelayList,
   } = useNip65Relays();
   const [userRelays, setUserRelaysState] = useState<RelayConfig[]>([]);
-  const [pubkey, setPubkey] = useActiveNostrAccount();
+  const [pubkey, setPubkey] = useActiveNostrAccount(loadRelays);
   const relays = useAppNetworkRelays(pubkey, nip65Relays, userRelays);
   const [signerType, setSignerType] = useState<SignerType | null>(null);
   const [profile, setProfile, profileSetterFor] = useAccountState<NostrProfile | null>(
