@@ -1,3 +1,5 @@
+import { buyerOrderNote } from './orderPresentation';
+
 // Gamma kind-16 order types 1–4 and kind-17 receipts are ONLY NIP-17 rumors.
 // Public events of those kinds have unrelated NIP-18 / NIP-25 meanings.
 // parseOrderEvent accepts decoded rumor shapes; transport boundaries reject public events.
@@ -45,7 +47,7 @@ export interface ParsedOrderEvent {
   phone?: string;
   contact?: string;
   notes?: string;
-  /** The event's free-text content. */
+  /** Bounded free text, excluding checkout-generated itemisation. */
   message: string;
 }
 
@@ -162,7 +164,8 @@ export function parseOrderEvent(ev: OrderEventInput): ParsedOrderEvent | null {
     shipping: tagValue(ev.tags, 'shipping'),
     payment,
     ...(type === 'order' ? contactFields(ev.tags) : {}),
-    message: typeof ev.content === 'string' ? ev.content.slice(0, 500) : '',
+    // Strip the complete generated suffix before the text cap can cut it in half.
+    message: typeof ev.content === 'string' ? buyerOrderNote(ev.content).slice(0, 500) : '',
   };
 }
 
@@ -262,7 +265,7 @@ export function parseStoredOrder(content: string): ParsedOrderEvent | null {
       phone: boundedText(o.phone),
       contact: boundedText(o.contact),
       notes: boundedText(o.notes),
-      message: typeof o.message === 'string' ? o.message.slice(0, 500) : '',
+      message: typeof o.message === 'string' ? buyerOrderNote(o.message).slice(0, 500) : '',
     };
   } catch {
     return null;

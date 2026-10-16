@@ -1,4 +1,5 @@
 import { useChatCardWidth } from '../styles/chatCardWidth';
+import { buyerOrderNote } from '../utils/orderPresentation';
 import { orderNavigationTarget } from '../utils/orderNavigation';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -47,6 +48,7 @@ function ConversationOrderCard({
     () => createConversationOrderCardStyles(colors, cardWidth),
     [colors, cardWidth],
   );
+  const note = buyerOrderNote(item.order.message);
   const header = orderCardHeader(item.order.type);
   const totalItems = item.order.items.reduce((sum, i) => sum + i.quantity, 0);
   return (
@@ -82,8 +84,11 @@ function ConversationOrderCard({
             {totalItems} item{totalItems === 1 ? '' : 's'}
           </Text>
         ) : null}
-        {item.order.message ? (
-          <Text style={styles.orderCardMessage}>{item.order.message}</Text>
+        {note ? (
+          <Text style={styles.orderCardMessage} testID={`conversation-order-note-${item.id}`}>
+            {item.order.type === 'order' ? `${t('sellerOrders.buyerNote')}: ` : ''}
+            {note}
+          </Text>
         ) : null}
         {item.awaitingInvoice ? (
           // My placed order with no payment request back yet. Many sellers
