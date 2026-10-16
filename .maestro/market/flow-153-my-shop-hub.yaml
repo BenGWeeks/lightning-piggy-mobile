@@ -20,12 +20,12 @@ name: My shop hub — Currencies, Shipping, Collections, Listings, Orders (#1534
     id: 'explore-card-market'
 - extendedWaitUntil:
     visible:
-      id: 'market-header-menu'
+      id: 'market-screen'
     timeout: 15000
 - tapOn:
-    id: 'market-header-menu'
+    id: 'profile-icon'
 - tapOn:
-    id: 'market-my-shop-button'
+    id: 'account-menu-shop'
 - extendedWaitUntil:
     visible:
       id: 'shop-hub-card'
