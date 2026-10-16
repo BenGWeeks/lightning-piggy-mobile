@@ -38,7 +38,7 @@ export function useMentionProfile(
         .filter((r) => r.write)
         .map((r) => r.url)
         .slice(0, 4),
-      ...RELAY_LIST_INDEXERS,
+      ...enabledAppRelays('indexers', RELAY_LIST_INDEXERS),
     ]),
   ]
     .sort()

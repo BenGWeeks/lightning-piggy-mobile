@@ -13,10 +13,14 @@ import {
 } from '../services/appRelayPrefs';
 import { setCurrentUserPubkey } from '../services/nostrActiveAccount';
 import { GC_RELAYS } from '../services/geocacheRelays';
+import { RELAY_LIST_INDEXERS } from '../utils/relayListEvents';
 
 const owner = 'a'.repeat(64);
 const mockRelays = [{ url: 'wss://personal.example', read: true, write: true }];
-jest.mock('../contexts/NostrContext', () => ({ useNostr: () => ({ relays: mockRelays }) }));
+jest.mock('../contexts/NostrContext', () => ({
+  useNostr: () => ({ relays: mockRelays }),
+  useNostrContacts: () => ({ contacts: [] }),
+}));
 jest.mock('@react-navigation/native', () => ({
   useFocusEffect: (callback: () => void) => {
     const React = jest.requireActual('react');
@@ -69,5 +73,12 @@ it('retries author/detail reads and cosmetic subscriptions despite identical per
   await act(async () => setAppRelayEnabled(owner, 'geocache', GC_RELAYS[0], false));
   expect(fetchCache).toHaveBeenCalledTimes(3);
   expect(fetchCachesByAuthor).toHaveBeenCalledTimes(3);
+  expect(jest.mocked(subscribeMentionProfile).mock.calls.at(-1)![3]).toEqual(
+    expect.arrayContaining(RELAY_LIST_INDEXERS),
+  );
+  await act(async () => setAppRelayEnabled(owner, 'indexers', RELAY_LIST_INDEXERS[0], false));
+  const fallbackRelays = jest.mocked(subscribeMentionProfile).mock.calls.at(-1)![3];
+  expect(fallbackRelays).not.toContain(RELAY_LIST_INDEXERS[0]);
+  expect(fallbackRelays).toContain('wss://personal.example');
   unmount();
 });
