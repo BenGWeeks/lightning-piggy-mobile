@@ -191,7 +191,10 @@ export async function fetchSellerEvents(input: {
   signal?: AbortSignal;
 }): Promise<Event[]> {
   const pubkey = input.pubkey.toLowerCase();
-  const writeRelays = lockRelays(input.relays.length ? input.relays : DEFAULT_RELAYS, pubkey);
+  const writeRelays = lockRelays(
+    input.relays.length ? input.relays : enabledAppRelays('default', DEFAULT_RELAYS),
+    pubkey,
+  );
   const relays = sellerEventRelays(writeRelays, pubkey);
   trackRelays(relays);
   const batches = await Promise.all([
@@ -238,7 +241,10 @@ export async function fetchLatestRevision(input: {
   relays: string[];
 }): Promise<RevisionResult> {
   const pubkey = input.pubkey.toLowerCase();
-  const writeRelays = lockRelays(input.relays.length ? input.relays : DEFAULT_RELAYS, pubkey);
+  const writeRelays = lockRelays(
+    input.relays.length ? input.relays : enabledAppRelays('default', DEFAULT_RELAYS),
+    pubkey,
+  );
   const relays = sellerEventRelays(writeRelays, pubkey);
   trackRelays(relays);
   // Marketplace replies supplement the write-relay quorum in every batch;
