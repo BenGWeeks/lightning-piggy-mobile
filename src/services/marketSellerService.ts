@@ -38,10 +38,10 @@ function sellerEventRelays(relays: readonly string[], pubkey?: string): string[]
   return lockRelays([...new Set([...MARKET_RELAYS, ...relays])], pubkey).slice(0, MAX_RELAYS);
 }
 
-/** Marketplace relays plus the user's write relays (or defaults), capped. */
+/** Keep the user's write relays distinct for pre-publish revision checks. */
 export function sellerRelays(relays: readonly { url: string; write: boolean; read: boolean }[]) {
   const write = relays.filter((r) => r.write && /^wss:\/\//.test(r.url)).map((r) => r.url);
-  return sellerEventRelays(write.length > 0 ? write : DEFAULT_RELAYS);
+  return [...new Set(write.length > 0 ? write : DEFAULT_RELAYS)].slice(0, MAX_RELAYS);
 }
 
 /**
@@ -98,12 +98,14 @@ export async function verifiedOwnEvents(
  * (min 1) completing with EOSE — before an answer counts. Fewer is "unknown"
  * and rejects: an empty answer from one fast relay must not read as "no
  * shop", while one dead relay in the user's list mustn't block everything.
- * Returns the union of the relays that completed.
+ * Returns the union of the relays that completed. When requiredRelays is
+ * supplied, at least one of those relays must also complete with EOSE.
  */
 export async function queryQuorum(
   relays: readonly string[],
   filter: Filter,
   signal?: AbortSignal,
+  requiredRelays?: readonly string[],
 ): Promise<Event[]> {
   // Relays parked as dead (#1326) neither burn a timeout nor count against
   // the quorum; selectHealthyRelays always keeps the healthiest two.
@@ -126,6 +128,14 @@ export async function queryQuorum(
     const quorum = Math.max(1, Math.ceil(unique.length / 2));
     if (signal?.aborted || answered.length < quorum) {
       throw new Error(`Only ${answered.length} of ${unique.length} relays answered`);
+    }
+    if (
+      requiredRelays &&
+      !results.some(
+        (result, index) => result.status === 'fulfilled' && requiredRelays.includes(unique[index]),
+      )
+    ) {
+      throw new Error('No seller write relay answered');
     }
     return answered.flatMap((r) => r.value);
   } finally {
@@ -174,7 +184,8 @@ export async function fetchSellerEvents(input: {
  * null when relays completed with none. Used right before publishing so an
  * edit never silently overwrites a newer revision made elsewhere (and a
  * first-time shop never replaces a shop a slow relay hadn't returned).
- * Fails closed on timeout.
+ * Fails closed unless at least one seller write relay completes every query;
+ * marketplace replies supplement those results but cannot replace them.
  */
 export async function fetchLatestRevision(input: {
   pubkey: string;
@@ -184,19 +195,23 @@ export async function fetchLatestRevision(input: {
   relays: string[];
 }): Promise<RevisionResult> {
   const pubkey = input.pubkey.toLowerCase();
-  const relays = sellerEventRelays(input.relays, pubkey);
+  const writeRelays = lockRelays(input.relays.length ? input.relays : DEFAULT_RELAYS, pubkey);
+  const relays = sellerEventRelays(writeRelays, pubkey);
   trackRelays(relays);
+  // Preserve write-relay provenance even when marketplace replies alone
+  // meet the overall quorum (or health filtering parks every write relay).
+  const queryRevision = (filter: Filter) => queryQuorum(relays, filter, undefined, writeRelays);
   const coordinate = `${input.kind}:${pubkey}:${input.dTag}`;
   // The revisions plus any NIP-09 deletion of that address: a deleted shop
   // that some relays still serve is not "an existing shop".
   const [events, deletions] = await Promise.all([
-    queryQuorum(relays, {
+    queryRevision({
       kinds: [input.kind],
       authors: [pubkey],
       '#d': [input.dTag],
       limit: 5,
     }),
-    queryQuorum(relays, {
+    queryRevision({
       kinds: [DELETION_KIND],
       authors: [pubkey],
       '#a': [coordinate],
@@ -205,7 +220,7 @@ export async function fetchLatestRevision(input: {
   ]);
   const ids = [...new Set([...events.map((e) => e.id), ...(input.baseId ? [input.baseId] : [])])];
   const idDeletions = ids.length
-    ? await queryQuorum(relays, {
+    ? await queryRevision({
         kinds: [DELETION_KIND],
         authors: [pubkey],
         '#e': ids,

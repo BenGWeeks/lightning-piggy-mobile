@@ -2,7 +2,11 @@ import { TEST_ACCOUNT_KEYS } from '../utils/testAccounts';
 import { TEST_RELAY_URL } from '../config/testRelayLockdown';
 import { MARKET_RELAYS } from '../utils/marketListingsQuery';
 import { buildShopTemplate } from '../utils/marketSellerTestFixtures';
-import { resolveCurrentRevision, StaleRevisionError } from '../utils/marketSellerRevision';
+import {
+  resolveCurrentRevision,
+  SellerFetchError,
+  StaleRevisionError,
+} from '../utils/marketSellerRevision';
 import { nostrVerifyEvent } from './nostrCrypto';
 import { __resetVerifiedEventCache } from './nostrVerifyCache';
 import { acquireMarketListingsPool } from './marketListingsPool';
@@ -96,16 +100,13 @@ beforeEach(async () => {
 });
 
 describe('sellerRelays', () => {
-  it('reserves marketplace relays before secure write relays, dedupes and falls back to defaults', () => {
+  it('keeps secure write relays distinct, dedupes and falls back to defaults', () => {
     const relays = Array.from({ length: 10 }, (_, i) => ({
       url: `wss://r${i}.example`,
       read: true,
       write: true,
     }));
-    expect(sellerRelays(relays)).toEqual([
-      ...MARKET_RELAYS,
-      ...relays.slice(0, 4).map((r) => r.url),
-    ]);
+    expect(sellerRelays(relays)).toEqual(relays.slice(0, 8).map((r) => r.url));
     expect(
       sellerRelays([
         { url: 'wss://w.example', read: false, write: true },
@@ -113,8 +114,8 @@ describe('sellerRelays', () => {
         { url: 'ws://insecure.example', read: false, write: true },
         { url: 'wss://read-only.example', read: true, write: false },
       ]),
-    ).toEqual([...MARKET_RELAYS, 'wss://w.example']);
-    expect(sellerRelays([])).toEqual([...MARKET_RELAYS, 'wss://default.example']);
+    ).toEqual(['wss://w.example']);
+    expect(sellerRelays([])).toEqual(['wss://default.example']);
   });
 });
 
@@ -318,6 +319,48 @@ describe('verifiedOwnEvents dedupe', () => {
 });
 
 describe('fetchLatestRevision', () => {
+  it.each(['revision', 'address deletion', 'id deletion'])(
+    'rejects empty marketplace replies when the write relay fails the %s query',
+    async (failedQuery) => {
+      const base = listing('cached', 100);
+      const writeRelays = sellerRelays([{ url: 'wss://write.example', read: true, write: true }]);
+      (querySyncAbortable as jest.Mock).mockImplementation((_pool, relays, filter) => {
+        const query = filter['#d'] ? 'revision' : filter['#a'] ? 'address deletion' : 'id deletion';
+        return relays[0] === writeRelays[0] && query === failedQuery
+          ? Promise.reject(new Error('Relay query timed out before EOSE'))
+          : Promise.resolve([]);
+      });
+      const fetchLatest = () =>
+        fetchLatestRevision({
+          pubkey,
+          kind: 30402,
+          dTag: 'cached',
+          baseId: base.id,
+          relays: writeRelays,
+        });
+      await expect(fetchLatest()).rejects.toThrow('No seller write relay answered');
+      await expect(resolveCurrentRevision({ fetchLatest, base })).rejects.toBeInstanceOf(
+        SellerFetchError,
+      );
+    },
+  );
+
+  it('accepts one successful write relay alongside marketplace replies', async () => {
+    (querySyncAbortable as jest.Mock).mockImplementation((_pool, relays) =>
+      relays[0] === 'wss://failed.example'
+        ? Promise.reject(new Error('Relay query timed out before EOSE'))
+        : Promise.resolve([]),
+    );
+    await expect(
+      fetchLatestRevision({
+        pubkey,
+        kind: 30402,
+        dTag: 'new',
+        relays: ['wss://failed.example', 'wss://write.example'],
+      }),
+    ).resolves.toMatchObject({ event: null });
+  });
+
   it('returns the newest verified revision of exactly that coordinate, failing closed', async () => {
     const v1 = listing('a', 100);
     const v2 = listing('a', 200);
