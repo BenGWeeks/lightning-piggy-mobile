@@ -2,6 +2,7 @@ import { act, renderHook } from '@testing-library/react-native';
 import { useMentionProfile } from './useMentionProfile';
 import { __resetMentionProfilesForTests } from '../services/nostrMentionProfiles';
 import { querySyncAbortable } from '../services/relayQuery';
+import * as appRelayPrefs from '../services/appRelayPrefs';
 
 let mockFocused = true;
 let mockNostr: Record<string, unknown>;
@@ -42,6 +43,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   __resetMentionProfilesForTests();
+  jest.restoreAllMocks();
   jest.useRealTimers();
 });
 
@@ -161,6 +163,19 @@ it('retries a cache miss once using the account write relays and both indexers',
   expect(query.mock.calls[1][1]).toEqual(
     expect.arrayContaining(['wss://write', 'wss://purplepag.es', 'wss://user.kindpag.es']),
   );
+  hook.unmount();
+});
+
+it('skips the retry when no write relays or enabled indexers are available', async () => {
+  jest
+    .spyOn(appRelayPrefs, 'enabledAppRelays')
+    .mockImplementation((group, list) => (group === 'indexers' ? [] : list));
+  const hook = renderHook(() => useMentionProfile('a'));
+  await act(async () => {
+    await jest.advanceTimersByTimeAsync(1000);
+  });
+  expect(query).toHaveBeenCalledTimes(1);
+  expect(query.mock.calls[0][1]).toEqual(['wss://read']);
   hook.unmount();
 });
 

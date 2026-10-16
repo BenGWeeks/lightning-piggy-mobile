@@ -57,7 +57,7 @@ export function useMentionProfile(
         pubkey,
         relayKey ? relayKey.split('|') : enabledAppRelays('default', DEFAULT_RELAYS),
         (profile) => setState({ pubkey, profile }),
-        retryKey.split('|'),
+        retryKey ? retryKey.split('|') : [],
         selfPubkey,
         allowRelayLookup,
       );
