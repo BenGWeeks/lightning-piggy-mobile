@@ -73,6 +73,8 @@ export default function AdvancedRelaysSection({
             </View>
             <Switch
               value={isAppRelayEnabled(pubkey, group, url)}
+              trackColor={{ false: colors.divider, true: colors.brandPink }}
+              thumbColor={isAppRelayEnabled(pubkey, group, url) ? colors.white : undefined}
               testID={`app-relay-toggle-${relayRowHost(url)}`}
               accessibilityLabel={t('appRelays.toggle', { host: relayRowHost(url) })}
               onValueChange={(value) => {
