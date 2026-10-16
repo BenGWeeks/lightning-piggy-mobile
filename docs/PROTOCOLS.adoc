@@ -63,6 +63,32 @@ There is no scheduled removal date. Removal will be announced one release ahead 
 * The `subject` tag on a kind-14 is what 0xchat / Amethyst / Quartz read to display the conversation title — `createGroupChatRumor` always emits one; `createDirectMessageRumor` deliberately omits it (a 1:1 thread has no name). See issue #271 for the cross-client subject-tag interop work.
 * Lightning Piggy does **not** publish a kind-10050 NIP-17 DM relay-list event. We rely on the user's existing NIP-65 write-relay list plus the DEFAULT_RELAYS fallback. If a recipient publishes their own kind-10050 we do not currently honour it — they must accept wraps on at least one relay we publish to.
 
+==== Direct chat versus a two-person named group (#1599)
+
+NIP-17 defines a room by the sender plus the deduplicated `p`-tag participant set;
+`subject` names or renames that room and is optional on later messages.
+Lightning Piggy exposes both a direct chat and a named two-person group for the
+same participants, which that wire identity cannot distinguish on its own.
+The app therefore applies this explicit routing policy to newly ingested rumors:
+
+* Exactly one other participant and no valid nonempty `subject`: direct chat,
+  even when the group registry contains the same membership.
+* A valid `subject`, or two or more other participants: group routing by the
+  participant set. A changed subject renames a synthetic room; it is not a new id.
+* Group text and file sends include `subject` on every rumor. There is no separate
+  app-specific group/room tag. Direct sends omit it. Marmot routing is unchanged.
+
+Compatibility trade-off: a two-person group message from another client such as
+0xchat or Amethyst that omits `subject` is indistinguishable from a direct message
+and now appears in the direct chat. This is an app policy, not a NIP-17 requirement.
+Groups with three or more participants still route by membership without a subject.
+Multiple named groups with identical membership are not given distinct wire identities.
+
+No stored rows, group ids, schema, or existing history are migrated or reclassified.
+Persisted group wrap ids continue to suppress live replay, and persisted direct rows
+keep the decrypt-once gate. Previously misrouted history remains where it was stored;
+an uncached rumor fetched again is subject to the new policy.
+
 ==== Code references
 
 |===

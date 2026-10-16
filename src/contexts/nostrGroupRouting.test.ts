@@ -63,110 +63,35 @@ afterEach(() => {
   setSyntheticGroupReconciler(null);
 });
 
-it.each(['room', 'no-room', 'cancelled'] as const)(
-  'waits for pending reconciliation before routing concurrent ordinary live arrivals (%s)',
-  async (outcome) => {
-    setKnownGroups([], ME);
-    let finish!: (group: Group | null) => void;
-    const reconcile = jest.fn(
-      (_input: SyntheticRoomInput) => new Promise<Group | null>((resolve) => (finish = resolve)),
-    );
-    setSyntheticGroupReconciler(reconcile, ME);
-    const queueInboxEntry = jest.fn();
-    const writes: Promise<void>[] = [];
-    let cancelled = false;
-    const surface = createLiveRumorSurfacer({
-      viewerPubkey: ME,
-      isCancelled: () => cancelled,
-      shouldAbort: () => cancelled,
-      followPubkeysRef: { current: new Set([PEER]) },
-      followGateBuffer: { defer: jest.fn(), reevaluate: jest.fn(), clear: jest.fn(), size: 0 },
-      isFollowHydrated: () => true,
-      isFreshArrival: () => true,
-      queueInboxEntry,
-      knownWrapIds: new Set(),
-      seen: new Set(),
-      chainWrite: (task) => {
-        writes.push(task());
-      },
-    });
-    const first = surface(
-      {
-        ...rumor(14),
-        tags: [
-          ['p', ME],
-          ['subject', 'Family'],
-        ],
-      },
-      'first',
-    );
-    // Welcome routing now completes before group reconciliation starts.
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    expect(reconcile).toHaveBeenCalledTimes(1);
-    const followup = surface({ ...rumor(14), content: 'follow-up', created_at: 21 }, 'followup');
-    // Let ordinary live delivery proceed while room creation is still blocked.
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    const prematureInboxCalls = queueInboxEntry.mock.calls.length;
-    const prematureDmWrites = jest.mocked(upsertDmMessages).mock.calls.length;
-    const prematureNotifications = jest.mocked(fireMessageNotification).mock.calls.length;
-    cancelled = outcome === 'cancelled';
-    const input = reconcile.mock.calls[0][0];
-    finish(
-      outcome === 'no-room'
-        ? null
-        : {
-            id: input.groupId,
-            name: input.name,
-            memberPubkeys: input.memberPubkeys,
-            createdAt: 1,
-            updatedAt: 1,
-          },
-    );
-    await Promise.all([first, followup]);
-    await Promise.all(writes);
-    expect(prematureInboxCalls).toBe(0);
-    expect(prematureDmWrites).toBe(0);
-    expect(prematureNotifications).toBe(0);
-    if (outcome === 'room') {
-      expect(appendGroupMessage).toHaveBeenCalledTimes(2);
-      for (const id of ['first', 'followup']) {
-        expect(appendGroupMessage).toHaveBeenCalledWith(
-          ME,
-          input.groupId,
-          expect.objectContaining({ id }),
-        );
-        expect(notifyGroupMessage).toHaveBeenCalledWith(
-          input.groupId,
-          expect.objectContaining({ id }),
-        );
-      }
-      expect(fireMessageNotification).toHaveBeenCalledTimes(2);
-      expect(fireMessageNotification).toHaveBeenCalledWith(
-        expect.objectContaining({
-          kind: 'group',
-          threadId: input.groupId,
-          body: 'follow-up',
-        }),
-      );
-      expect(queueInboxEntry).not.toHaveBeenCalled();
-      expect(upsertDmMessages).not.toHaveBeenCalled();
-      expect(notifyDmMessage).not.toHaveBeenCalled();
-    } else if (outcome === 'no-room') {
-      expect(queueInboxEntry).toHaveBeenCalledTimes(1);
-      expect(queueInboxEntry).toHaveBeenCalledWith(
-        expect.objectContaining({ id: 'followup', partnerPubkey: PEER }),
-      );
-      expect(upsertDmMessages).toHaveBeenCalledTimes(1);
-      expect(appendGroupMessage).not.toHaveBeenCalled();
-      expect(fireMessageNotification).toHaveBeenCalledWith(expect.objectContaining({ kind: 'dm' }));
-    } else {
-      expect(queueInboxEntry).not.toHaveBeenCalled();
-      expect(upsertDmMessages).not.toHaveBeenCalled();
-      expect(appendGroupMessage).not.toHaveBeenCalled();
-      expect(fireMessageNotification).not.toHaveBeenCalled();
-    }
-  },
-);
+it('does not wait for a concurrent room creation before delivering an unmarked DM', async () => {
+  setKnownGroups([], ME);
+  let finish!: (group: Group | null) => void;
+  const reconcile = jest.fn(
+    (_input: SyntheticRoomInput) => new Promise<Group | null>((resolve) => (finish = resolve)),
+  );
+  setSyntheticGroupReconciler(reconcile, ME);
+  const marked = {
+    ...rumor(14),
+    tags: [
+      ['p', ME],
+      ['subject', 'Family'],
+    ],
+  };
+  const first = tryRouteGroupRumor(marked, ME, 'first', undefined, () => true);
+  expect(reconcile).toHaveBeenCalledTimes(1);
+  expect(await tryRouteGroupRumor(rumor(14), ME, 'direct')).toMatchObject({ kind: 'not-group' });
+  expect(appendGroupMessage).not.toHaveBeenCalled();
+  const input = reconcile.mock.calls[0][0];
+  finish({
+    id: input.groupId,
+    name: input.name,
+    memberPubkeys: [PEER],
+    createdAt: 1,
+    updatedAt: 1,
+  });
+  expect(await first).toMatchObject({ kind: 'routed' });
+  expect(appendGroupMessage).toHaveBeenCalledTimes(1);
+});
 
 it.each([15, 444, NWC_SHARE_KIND])(
   'leaves subjectless kind-%s rumors on their specialized DM path despite a matching room',
@@ -216,6 +141,35 @@ describe.each([
     await Promise.all(writes);
     return queueInboxEntry.mock.calls[0]?.[0];
   }
+
+  it.each([false, true])('routes text by its marker (sender echo=%s)', async (senderEcho) => {
+    const message = rumor(14);
+    if (senderEcho) {
+      message.pubkey = ME;
+      message.tags = [
+        ['p', PEER],
+        ['p', ME],
+        ['p', PEER],
+      ];
+    }
+    const entry = await receive(message, hasSubject ? 0 : 1);
+    if (hasSubject) {
+      expect(entry).toBeUndefined();
+      expect(upsertDmMessages).not.toHaveBeenCalled();
+      expect(appendGroupMessage).toHaveBeenCalledWith(
+        ME,
+        'family',
+        expect.objectContaining({ text: 'hello', senderPubkey: message.pubkey }),
+      );
+    } else {
+      expect(entry).toMatchObject({ partnerPubkey: PEER, fromMe: senderEcho, text: 'hello' });
+      expect(upsertDmMessages).toHaveBeenCalledWith([
+        expect.objectContaining({ conversation: PEER, content: 'hello', fromMe: senderEcho }),
+      ]);
+      expect(appendGroupMessage).not.toHaveBeenCalled();
+      expect(notifyGroupMessage).not.toHaveBeenCalled();
+    }
+  });
 
   if (!hasSubject) {
     it.each([['subject', ''], ['subject', ' \t\n '], ['subject']])(
