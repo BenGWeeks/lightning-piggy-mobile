@@ -1,6 +1,6 @@
 import { checkRemoteUrl } from '../utils/remoteUrlPolicy';
 import React, { useMemo } from 'react';
-import { Text, TouchableOpacity, View } from 'react-native';
+import { Text, TouchableOpacity, View, type StyleProp, type ViewStyle } from 'react-native';
 import { ImageIcon, Link2 } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useLocale } from '../contexts/LocaleContext';
@@ -25,13 +25,15 @@ interface Props {
   /** Omit when a parent touchable owns the tap (the image bubble does, so a
    *  long-press still reaches the message menu). */
   onPress?: () => void;
+  /** Match the image geometry supplied by the containing chat bubble. */
+  style?: StyleProp<ViewStyle>;
 }
 
 /**
  * Placeholder for chat media that didn't auto-load because the sender isn't
  * someone the reader follows (#1338). Nothing is fetched until it's tapped.
  */
-const TapToLoadMedia: React.FC<Props> = ({ variant, url, fromMe, testID, onPress }) => {
+const TapToLoadMedia: React.FC<Props> = ({ variant, url, fromMe, testID, onPress, style }) => {
   const colors = useThemeColors();
   const { t } = useLocale();
   const styles = useMemo(() => createTapToLoadMediaStyles(colors, fromMe), [colors, fromMe]);
@@ -40,7 +42,17 @@ const TapToLoadMedia: React.FC<Props> = ({ variant, url, fromMe, testID, onPress
 
   if (!checkRemoteUrl(url, { kind: variant === 'preview' ? 'preview' : 'media' }).ok) {
     return (
-      <View style={styles.textCol} testID={testID}>
+      <View
+        style={[
+          variant === 'image'
+            ? styles.imageBox
+            : variant === 'thumb'
+              ? styles.thumbBox
+              : styles.textCol,
+          style,
+        ]}
+        testID={testID}
+      >
         <Text style={styles.label}>{t('messageBubble.blockedLink')}</Text>
       </View>
     );
@@ -59,7 +71,7 @@ const TapToLoadMedia: React.FC<Props> = ({ variant, url, fromMe, testID, onPress
 
   if (variant === 'image') {
     return (
-      <View style={styles.imageBox} testID={testID}>
+      <View style={[styles.imageBox, style]} testID={testID}>
         <ImageIcon size={28} color={iconColor} />
         <Text style={[styles.label, styles.labelCentered]}>
           {t('messageBubble.tapToLoadImage')}

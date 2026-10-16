@@ -126,6 +126,7 @@ const MessageImageBubble: React.FC<Props> = ({
           />
         ) : (
           <TapToLoadMedia
+            style={[styles.imageBubbleImage, attachmentAspectStyle(aspect)]}
             variant="image"
             url={image.url}
             fromMe={fromMe}
