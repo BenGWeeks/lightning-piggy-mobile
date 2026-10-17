@@ -87,6 +87,12 @@ describe('dmDb', () => {
       expect(mockTransaction).not.toHaveBeenCalled();
     });
 
+    it('writes nothing when persistIf fails inside the transaction', async () => {
+      await upsertDmMessages([row({ eventId: 'e1' })], { persistIf: () => false });
+      expect(mockTransaction).toHaveBeenCalledTimes(1);
+      expect(mockExecute).not.toHaveBeenCalled();
+    });
+
     it('upserts received rows in one transaction, keeping any existing tick (COALESCE)', async () => {
       await upsertDmMessages([row({ eventId: 'e1' }), row({ eventId: 'e2' })]);
       expect(mockTransaction).toHaveBeenCalledTimes(1);
@@ -475,8 +481,9 @@ describe('dmDb', () => {
   });
 
   describe('deleteDmMessagesForOwner', () => {
-    it("deletes only the owner's rows", async () => {
+    it("deletes only the owner's rows, in a transaction (ordered against upserts)", async () => {
       await deleteDmMessagesForOwner(OWNER);
+      expect(mockTransaction).toHaveBeenCalledTimes(1);
       const [sql, params] = mockExecute.mock.calls[0];
       expect(sql).toContain('DELETE FROM dm_messages WHERE owner = ?');
       expect(params).toEqual([OWNER]);

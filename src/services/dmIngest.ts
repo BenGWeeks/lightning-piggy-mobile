@@ -43,7 +43,7 @@ export interface IngestOptions {
   onProgress?: (decrypted: number, freshTotal: number) => void;
   /** Abort cooperatively (e.g. signer/identity changed mid-refresh). */
   signal?: { aborted: boolean };
-  /** Checked right before the rows are saved; false drops them (e.g. the
+  /** Checked before and inside the save; false drops the rows (e.g. the
    * account was signed out while a background write was decrypting). */
   persistIf?: () => boolean;
 }
@@ -112,7 +112,8 @@ export async function ingestWraps<W extends IngestableWrap>(
   // the skip-set and emitted UI entries stay abort-suppressed one layer up in
   // dmWrapIngest — those ARE partial-state and #412 intentionally drops them.)
   if (fresh.length > 0 && options.persistIf?.() !== false) {
-    await upsertDmMessages(fresh);
+    // Re-checked inside the write transaction, where a wipe can't slip in.
+    await upsertDmMessages(fresh, { persistIf: options.persistIf });
     result.ingested = fresh.length;
   }
   return result;

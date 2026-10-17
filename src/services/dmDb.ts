@@ -269,13 +269,22 @@ async function upsertOne(tx: Executor, m: DmMessageRow): Promise<void> {
  * matched optimistic local- rows (see `upsertOne`) and never downgrades an
  * existing delivery tick / rumorId to NULL.
  */
-export async function upsertDmMessages(rows: readonly DmMessageRow[]): Promise<void> {
+export async function upsertDmMessages(
+  rows: readonly DmMessageRow[],
+  /** Checked inside the write transaction; false writes nothing. Wipes are
+   * transactions too, so a wipe either lands first (and this sees its epoch)
+   * or runs after this write and removes it. */
+  options: { persistIf?: () => boolean } = {},
+): Promise<void> {
   if (rows.length === 0) return;
   const db = await getLocalDb();
+  let written = false;
   await db.transaction(async (tx) => {
+    if (options.persistIf?.() === false) return;
     for (const m of rows) await upsertOne(tx as Executor, m);
+    written = true;
   });
-  notifyDmStorage(rows);
+  if (written) notifyDmStorage(rows);
 }
 
 /** Import a legacy misfiled group row only if neither its wrap nor its rumor
@@ -812,5 +821,8 @@ export function dmOwnerEpoch(owner: string): number {
 export async function deleteDmMessagesForOwner(owner: string): Promise<void> {
   ownerWipeEpochs.set(owner.toLowerCase(), dmOwnerEpoch(owner) + 1);
   const db = await getLocalDb();
-  await db.execute(`DELETE FROM dm_messages WHERE owner = ?;`, [owner]);
+  // A transaction, so it's ordered against upserts (see upsertDmMessages).
+  await db.transaction(async (tx) => {
+    await tx.execute(`DELETE FROM dm_messages WHERE owner = ?;`, [owner]);
+  });
 }
