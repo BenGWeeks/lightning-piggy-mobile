@@ -663,7 +663,8 @@ export async function selectRepliedConversations(owner: string): Promise<string[
   const db = await getLocalDb();
   const res = await db.execute(
     `SELECT DISTINCT conversation FROM dm_messages
-      WHERE owner = ? AND from_me = 1 AND wire_kind IN (${REPLY_WIRE_KINDS.join(', ')});`,
+      WHERE owner = ? AND from_me = 1 AND wire_kind IN (${REPLY_WIRE_KINDS.join(', ')})
+        AND event_id NOT LIKE '${LOCAL_DM_ID_PREFIX}%';`,
     [owner],
   );
   return (res.rows ?? []).map((r) => String(r.conversation));

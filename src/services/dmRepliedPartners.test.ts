@@ -17,6 +17,7 @@ import {
   completeSkipSetRecheck,
   loadRepliedPartners,
   pendingSkipSetRecheck,
+  beginSkipSetRecheck,
 } from './dmRepliedPartners';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -81,10 +82,13 @@ it("doesn't let a read that started before a wipe restore the account", async ()
   expect(hasRepliedTo(ME, ALICE)).toBe(true);
 });
 
+// A reply just sent (older sent rows are history being filled in).
+const now = () => Math.floor(Date.now() / 1000);
+
 it('keeps a skip-set recheck pending across a restart until a refresh completes it', async () => {
   await loadRepliedPartners(ME);
   expect(pendingSkipSetRecheck(ME)).toBeNull();
-  await upsertDmMessages([row({ conversation: ALICE })]);
+  await upsertDmMessages([row({ conversation: ALICE, eventId: 'a1', createdAt: now() })]);
   const first = pendingSkipSetRecheck(ME);
   expect(first).not.toBeNull();
   // Same partner again, or a received message: nothing new to recheck.
@@ -100,11 +104,32 @@ it('keeps a skip-set recheck pending across a restart until a refresh completes 
   expect(restored).not.toBeNull();
 
   // A reply to someone new while a refresh runs stays pending after it.
-  await upsertDmMessages([row({ conversation: BOB })]);
+  await upsertDmMessages([row({ conversation: BOB, eventId: 'b1', createdAt: now() })]);
   completeSkipSetRecheck(ME, restored!);
   expect(pendingSkipSetRecheck(ME)).not.toBeNull();
   completeSkipSetRecheck(ME, pendingSkipSetRecheck(ME)!);
   expect(pendingSkipSetRecheck(ME)).toBeNull();
   await new Promise((resolve) => setTimeout(resolve, 0));
   expect(await AsyncStorage.getItem(`dm_replied_skip_recheck_v1_${ME}`)).toBeNull();
+});
+
+it('needs no recheck for old sent messages (a fresh sign-in filling in history)', async () => {
+  await loadRepliedPartners(ME);
+  await upsertDmMessages([row({ conversation: ALICE, eventId: 'old', createdAt: 1 })]);
+  expect(hasRepliedTo(ME, ALICE)).toBe(true);
+  expect(pendingSkipSetRecheck(ME)).toBeNull();
+});
+
+it('gives a recheck one forced pass per session, even if that pass is cut short', async () => {
+  await loadRepliedPartners(ME);
+  await upsertDmMessages([row({ conversation: ALICE, eventId: 'a2', createdAt: now() })]);
+  expect(beginSkipSetRecheck(ME)).not.toBeNull();
+  // Aborted before completing: no second forced pass this session...
+  expect(pendingSkipSetRecheck(ME)).toBeNull();
+  expect(beginSkipSetRecheck(ME)).toBeNull();
+  // ...but the persisted flag retries it after a restart.
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  __resetRepliedPartnersForTests();
+  await loadRepliedPartners(ME);
+  expect(beginSkipSetRecheck(ME)).not.toBeNull();
 });

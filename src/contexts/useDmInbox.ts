@@ -1,4 +1,5 @@
 import {
+  beginSkipSetRecheck,
   completeSkipSetRecheck,
   hasRepliedTo,
   loadRepliedPartners,
@@ -510,10 +511,9 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
           await ensureDmStoreMigrated(refreshForPubkey);
           // `passesFollowGate` reads it: people we've replied to pass (#1623).
           await loadRepliedPartners(refreshForPubkey);
-          // Replying to someone new re-reads the wraps the skip-set rejected
-          // before, so their earlier messages appear. Cleared only once this
-          // refresh has actually done it.
-          const skipSetRecheck = pendingSkipSetRecheck(refreshForPubkey);
+          // Replying to someone new re-reads wraps the skip-set rejected before:
+          // one forced pass per session, cleared once a refresh completes it.
+          const skipSetRecheck = beginSkipSetRecheck(refreshForPubkey);
           let skipSetRechecked = false;
 
           // Cold REBUILD detection (F1, #849). A post-login / post-wipe inbox

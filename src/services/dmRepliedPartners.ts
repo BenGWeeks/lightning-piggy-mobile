@@ -22,7 +22,14 @@ const epochs = new Map<string, number>();
 // number changes on every new reply, so finishing an older recheck can't
 // clear a newer one.
 const pendingRecheck = new Map<string, number>();
+// Rechecks a refresh has already started this session. Each gets one forced
+// pass (TTL and skip-set bypass), even if that pass is cut short; the
+// persisted flag retries it after a restart.
+const attemptedRecheck = new Map<string, number>();
 let recheckSeq = 0;
+/** A sent row this recent is a reply just made; older ones are history the
+ * inbox ingest is filling in (a fresh sign-in), which needs no recheck. */
+const FRESH_REPLY_SECS = 10 * 60;
 const RECHECK_KEY = 'dm_replied_skip_recheck_v1';
 let unsubscribe: (() => void) | null = null;
 
@@ -43,7 +50,7 @@ function watchSends(): void {
       if (set.has(partner)) continue;
       set.add(partner);
       repliedByOwner.set(owner, set);
-      markRecheckPending(owner);
+      if (row.createdAt >= Date.now() / 1000 - FRESH_REPLY_SECS) markRecheckPending(owner);
     }
   });
 }
@@ -79,10 +86,18 @@ export function hasRepliedTo(owner: string, partner: string): boolean {
   return repliedByOwner.get(owner)?.has(partner.toLowerCase()) ?? false;
 }
 
-/** The pending skip-set recheck for `owner`, or null. Pass it back to
- * `completeSkipSetRecheck` once a refresh has re-read the skip-set. */
+/** A pending skip-set recheck no refresh has started this session, or null. */
 export function pendingSkipSetRecheck(owner: string): number | null {
-  return pendingRecheck.get(owner) ?? null;
+  const recheck = pendingRecheck.get(owner);
+  return recheck !== undefined && attemptedRecheck.get(owner) !== recheck ? recheck : null;
+}
+
+/** Start the pending recheck's one forced pass, or null if there is none.
+ * Pass the value to `completeSkipSetRecheck` once the refresh completes. */
+export function beginSkipSetRecheck(owner: string): number | null {
+  const recheck = pendingSkipSetRecheck(owner);
+  if (recheck !== null) attemptedRecheck.set(owner, recheck);
+  return recheck;
 }
 
 /** A refresh re-read the skip-set for `recheck`. A newer reply since keeps
@@ -98,6 +113,7 @@ export function forgetRepliedPartners(owner: string): void {
   repliedByOwner.delete(owner);
   loads.delete(owner);
   pendingRecheck.delete(owner);
+  attemptedRecheck.delete(owner);
   epochs.set(owner, (epochs.get(owner) ?? 0) + 1);
   AsyncStorage.removeItem(perAccountKey(RECHECK_KEY, owner)).catch(() => undefined);
 }
@@ -107,6 +123,7 @@ export function __resetRepliedPartnersForTests(): void {
   loads.clear();
   epochs.clear();
   pendingRecheck.clear();
+  attemptedRecheck.clear();
   unsubscribe?.();
   unsubscribe = null;
 }
