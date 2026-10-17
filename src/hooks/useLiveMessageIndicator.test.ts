@@ -189,6 +189,25 @@ describe('a jump that lands (first unread / a mention)', () => {
     expect(result.current.atEdge).toBe(false);
   });
 
+  it('a message that arrives during the hold is scrolled into view when it lands at the edge', () => {
+    const { result, rerender, jump } = setup();
+    act(() => result.current.leaveEdge(500));
+    act(() => result.current.onScroll(scroll(0)));
+    rerender({ entries: [entry('new', 20), entry('old', 10)] });
+    expect(result.current.hasNewMessages).toBe(true);
+    act(() => jest.advanceTimersByTime(500));
+    expect(result.current.hasNewMessages).toBe(false);
+    expect(jump).toHaveBeenCalledWith(true);
+  });
+
+  it('landing at the edge with nothing new does not scroll', () => {
+    const { result, jump } = setup();
+    act(() => result.current.leaveEdge(500));
+    act(() => result.current.onScroll(scroll(0)));
+    act(() => jest.advanceTimersByTime(500));
+    expect(jump).not.toHaveBeenCalled();
+  });
+
   it('lands in history: the arrow stays', () => {
     const { result } = setup();
     act(() => result.current.leaveEdge(500));

@@ -36,6 +36,8 @@ export function useLiveMessageIndicator({
   // edge" (arrow shown, new messages pill instead of following).
   const lastDistance = useRef<number | null>(null);
   const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // A message arrived while away from the edge (the pill is showing).
+  const arrivedAway = useRef(false);
   const clearHoldTimer = () => {
     if (holdTimer.current !== null) clearTimeout(holdTimer.current);
     holdTimer.current = null;
@@ -60,6 +62,7 @@ export function useLiveMessageIndicator({
       clearHoldTimer();
       nearEdge.current = true;
       setAtEdge(true);
+      arrivedAway.current = false;
       setHasNewMessages(false);
     }
     if (loading) return;
@@ -77,11 +80,13 @@ export function useLiveMessageIndicator({
     if (changedScope) {
       nearEdge.current = true;
       setAtEdge(true);
+      arrivedAway.current = false;
       setHasNewMessages(false);
       return;
     }
     if (!arrived) return;
     if (!nearEdge.current) {
+      arrivedAway.current = true;
       setHasNewMessages(true);
       return;
     }
@@ -113,7 +118,10 @@ export function useLiveMessageIndicator({
       const near = distance < EDGE_DISTANCE && Date.now() >= heldUntil.current;
       nearEdge.current = near;
       setAtEdge((old) => (old === near ? old : near));
-      if (near) setHasNewMessages(false);
+      if (near) {
+        arrivedAway.current = false;
+        setHasNewMessages(false);
+      }
     },
     [edge],
   );
@@ -123,6 +131,7 @@ export function useLiveMessageIndicator({
     clearHoldTimer();
     nearEdge.current = true;
     setAtEdge(true);
+    arrivedAway.current = false;
     setHasNewMessages(false);
     scrollRef.current(true);
   }, []);
@@ -155,6 +164,12 @@ export function useLiveMessageIndicator({
         nearEdge.current = true;
         setAtEdge(true);
         setHasNewMessages(false);
+        // Something arrived during the hold: bring it into view, since the
+        // list kept the old rows anchored rather than following.
+        if (arrivedAway.current) {
+          arrivedAway.current = false;
+          scrollRef.current(true);
+        }
       }, holdMs);
     }
   }, []);
