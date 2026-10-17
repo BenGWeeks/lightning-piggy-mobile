@@ -50,8 +50,10 @@ export interface DmMessageRow {
 }
 
 /** Post-commit updates: consumers must not resolve wraps before their rows exist. */
-const dmStorageListeners = new Set<(owner: string) => void>();
-export function subscribeDmStorage(listener: (owner: string) => void): () => void {
+type DmStorageListener = (owner: string, rows: readonly DmMessageRow[]) => void;
+const dmStorageListeners = new Set<DmStorageListener>();
+/** `rows` are the committed rows for `owner` (empty when not row-specific). */
+export function subscribeDmStorage(listener: DmStorageListener): () => void {
   dmStorageListeners.add(listener);
   return () => {
     dmStorageListeners.delete(listener);
@@ -60,9 +62,10 @@ export function subscribeDmStorage(listener: (owner: string) => void): () => voi
 
 function notifyDmStorage(rows: readonly DmMessageRow[]): void {
   for (const owner of new Set(rows.map((row) => row.owner))) {
+    const ownerRows = rows.filter((row) => row.owner === owner);
     for (const listener of dmStorageListeners) {
       try {
-        listener(owner);
+        listener(owner, ownerRows);
       } catch {
         // A consumer failure must not turn a committed write into a failed one.
       }
@@ -828,14 +831,29 @@ export async function deleteMarmotMessages(
 // Bumped (synchronously) whenever an owner's rows are wiped, so a write that
 // started before the wipe can tell it would put rows back (see dmOwnerEpoch).
 const ownerWipeEpochs = new Map<string, number>();
+// Accounts wiped in this process (signed out): a background write that starts
+// after the wipe, before the identity is gone, must not recreate their rows.
+// Cleared when the account becomes active again (as group history does).
+const retiredOwners = new Set<string>();
 
 /** Changes when `owner`'s DM rows are wiped (sign-out / account removal). */
 export function dmOwnerEpoch(owner: string): number {
   return ownerWipeEpochs.get(owner.toLowerCase()) ?? 0;
 }
 
+/** Whether `owner` was signed out in this process and not signed in since. */
+export function isDmOwnerRetired(owner: string): boolean {
+  return retiredOwners.has(owner.toLowerCase());
+}
+
+/** Lift the sign-out write guard — call when `owner` becomes the active account. */
+export function reviveDmOwner(owner: string): void {
+  retiredOwners.delete(owner.toLowerCase());
+}
+
 export async function deleteDmMessagesForOwner(owner: string): Promise<void> {
   ownerWipeEpochs.set(owner.toLowerCase(), dmOwnerEpoch(owner) + 1);
+  retiredOwners.add(owner.toLowerCase());
   const db = await getLocalDb();
   // A transaction, so it's ordered against upserts (see upsertDmMessages).
   await db.transaction(async (tx) => {

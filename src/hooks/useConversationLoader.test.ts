@@ -18,7 +18,7 @@ jest.mock('@react-navigation/native', () => ({
 }));
 
 // Post-commit store signal (#1325): captured so a test can fire it.
-let mockStorageListener: ((owner: string) => void) | undefined;
+let mockStorageListener: ((owner: string, rows: unknown[]) => void) | undefined;
 jest.mock('../services/dmDb', () => ({
   ...jest.requireActual('../services/dmDb'),
   subscribeDmStorage: (listener: (owner: string) => void) => {
@@ -182,8 +182,19 @@ it('shows a message whose store write commits after its live announcement (#1325
   };
   loadInitialConversation.mockResolvedValue([legacy, modern, late]);
   await act(async () => {
-    mockStorageListener?.('owner');
+    mockStorageListener?.('owner', []);
     await new Promise((resolve) => setTimeout(resolve, 200));
   });
   expect(result.current.messages.map((m) => m.id)).toContain('late');
+});
+
+it("doesn't re-read the thread for another conversation's write", async () => {
+  const { result, loadInitialConversation } = setup('nip17');
+  await waitFor(() => expect(result.current.messages.map((m) => m.id)).toContain('modern'));
+  const reads = loadInitialConversation.mock.calls.length;
+  await act(async () => {
+    mockStorageListener?.('owner', [{ conversation: 'someone-else' }]);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  });
+  expect(loadInitialConversation.mock.calls.length).toBe(reads);
 });

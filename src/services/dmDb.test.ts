@@ -19,6 +19,8 @@ import {
   hasConversationWith,
   deleteDmMessagesForOwner,
   dmOwnerEpoch,
+  isDmOwnerRetired,
+  reviveDmOwner,
   deleteMarmotMessages,
   type DmMessageRow,
   getConversationForEvent,
@@ -497,6 +499,15 @@ describe('dmDb', () => {
       await wipe;
       expect(dmOwnerEpoch(OWNER.toUpperCase())).toBe(before + 1);
     });
+
+    it('retires the owner until it signs in again', async () => {
+      reviveDmOwner(OWNER);
+      expect(isDmOwnerRetired(OWNER)).toBe(false);
+      await deleteDmMessagesForOwner(OWNER);
+      expect(isDmOwnerRetired(OWNER.toUpperCase())).toBe(true);
+      reviveDmOwner(OWNER);
+      expect(isDmOwnerRetired(OWNER)).toBe(false);
+    });
   });
 });
 
@@ -536,7 +547,11 @@ it('signals each owner once after a committed upsert and unsubscribes', async ()
     return rowsResult([]);
   });
   await upsertDmMessages([row(), row({ eventId: 'e2' }), row({ owner: 'owner2' })]);
-  expect(listener.mock.calls).toEqual([[OWNER], ['owner2']]);
+  // Each owner gets its own committed rows (#1623 tracks our sends from them).
+  expect(listener.mock.calls).toEqual([
+    [OWNER, [row(), row({ eventId: 'e2' })]],
+    ['owner2', [row({ owner: 'owner2' })]],
+  ]);
   unsubscribe();
   await upsertDmMessages([row()]);
   expect(listener).toHaveBeenCalledTimes(2);
@@ -560,7 +575,7 @@ it('signals imported rows after commit so placeholders can resolve', async () =>
   const unsubscribe = subscribeDmStorage(listener);
   try {
     await importDmMessages([row()]);
-    expect(listener).toHaveBeenCalledWith(OWNER);
+    expect(listener).toHaveBeenCalledWith(OWNER, [row()]);
   } finally {
     unsubscribe();
   }

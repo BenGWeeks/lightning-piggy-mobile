@@ -15,6 +15,7 @@ import {
   updateDmDeliveryStatuses,
   hasStoredWraps,
   getConversationMessages,
+  reviveDmOwner,
   type DmMessageRow,
 } from '../services/dmDb';
 import { loadInboxEntries } from '../services/dmInbox';
@@ -124,7 +125,10 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
   } = options;
 
   useEffect(() => {
-    if (isLoggedIn && pubkey) reviveSellerAccount(pubkey);
+    if (isLoggedIn && pubkey) {
+      reviveSellerAccount(pubkey);
+      reviveDmOwner(pubkey); // background DM writes may save for it again
+    }
   }, [isLoggedIn, pubkey]);
 
   // The inbox is tagged with the account that owns it (see dmInboxScope):

@@ -219,9 +219,12 @@ export function useConversationLoader({
       let storeRead = 0;
       let focused = true;
       const viewer = notification?.owner?.toLowerCase();
-      const unsubscribeStore = subscribeDmStorage((owner) => {
-        // Another account's writes (a background watch) aren't this thread's.
+      const peer = pubkey.toLowerCase();
+      const unsubscribeStore = subscribeDmStorage((owner, rows) => {
+        // Only this account's writes to this thread (rows are empty when a
+        // write isn't row-specific: re-read then too).
         if (storeTimer || (viewer && owner.toLowerCase() !== viewer)) return;
+        if (rows.length && !rows.some((r) => r.conversation.toLowerCase() === peer)) return;
         storeTimer = setTimeout(() => {
           storeTimer = undefined;
           const read = ++storeRead;

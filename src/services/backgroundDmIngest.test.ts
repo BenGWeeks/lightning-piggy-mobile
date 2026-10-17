@@ -7,7 +7,8 @@ jest.mock('../contexts/dmWrapIngest', () => ({
   ingestInboxWraps: (params: unknown) => mockIngest(params),
 }));
 let mockEpoch = 0;
-jest.mock('./dmDb', () => ({ dmOwnerEpoch: () => mockEpoch }));
+let mockRetired = false;
+jest.mock('./dmDb', () => ({ dmOwnerEpoch: () => mockEpoch, isDmOwnerRetired: () => mockRetired }));
 const mockIdentities = jest.fn();
 jest.mock('./identitiesStore', () => ({ loadIdentities: () => mockIdentities() }));
 jest.mock('./backgroundDmReadRelays', () => ({
@@ -67,6 +68,13 @@ describe('storeDecryptedWrap', () => {
     expect(persistIf()).toBe(true);
     mockEpoch += 1; // deleteDmMessagesForOwner
     expect(persistIf()).toBe(false);
+  });
+
+  it("won't save for an account signed out before the write started", async () => {
+    mockRetired = true; // wiped; identity not yet removed
+    await storeDecryptedWrap(ME, wrap, rumor, new Set([FRIEND]));
+    expect(lastIngest().persistIf()).toBe(false);
+    mockRetired = false;
   });
 
   it('stores nothing without a contacts cache (the refresh applies the gate)', async () => {

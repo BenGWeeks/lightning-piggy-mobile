@@ -310,9 +310,10 @@ async function handleWrap(input: {
   // Keep what we just decrypted (#1325): tapping the alert or opening
   // Messages then shows it at once instead of waiting for an inbox refresh.
   // Fresh, gated 1:1 messages only: the on-open backlog, Marmot invites and
-  // an unknown follow set are left to the refresh. Not awaited: the write
+  // an unknown follow set are left to the refresh; and not while the app's
+  // live sub is armed, which stores it already. Not awaited: the write
   // mustn't delay the alert.
-  if (input.followedPubkeys) {
+  if (input.followedPubkeys && !isLiveDmSubArmed()) {
     void storeDecryptedWrap(viewerPubkey, ev, rumor, input.followedPubkeys).catch(() => undefined);
   }
   // Claim BEFORE the async name resolution below — the claim is the
