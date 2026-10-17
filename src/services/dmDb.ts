@@ -680,6 +680,22 @@ export async function hasConversationWith(owner: string, conversation: string): 
   return (res.rows ?? []).length > 0;
 }
 
+/** Kinds of a sent row that count as replying in a 1:1 thread (#1623): text
+ * and files. Orders, invites and other structured rows don't. */
+export const REPLY_WIRE_KINDS: readonly number[] = [4, 14, 15];
+
+/** Everyone this owner has sent a 1:1 message to (#1623), any protocol. */
+export async function selectRepliedConversations(owner: string): Promise<string[]> {
+  const db = await getLocalDb();
+  const res = await db.execute(
+    `SELECT DISTINCT conversation FROM dm_messages
+      WHERE owner = ? AND from_me = 1 AND wire_kind IN (${REPLY_WIRE_KINDS.join(', ')})
+        AND event_id NOT LIKE '${LOCAL_DM_ID_PREFIX}%';`,
+    [owner],
+  );
+  return (res.rows ?? []).map((r) => String(r.conversation));
+}
+
 /**
  * All stored NIP-17 wrap ids for this owner (kind-4 rows excluded — their ids
  * are kind-4 event ids, not wrap ids; optimistic local- rows excluded — their
