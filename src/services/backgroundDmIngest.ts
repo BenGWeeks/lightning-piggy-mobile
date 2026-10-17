@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { CONTACTS_CACHE_KEY_BASE } from '../contexts/nostrCacheKeys';
 import { unwrapWrapNsec, type DecodedRumor } from '../utils/nip17Unwrap';
 import { resolveReadRelays } from './backgroundDmReadRelays';
+import { hasRepliedTo, loadRepliedPartners } from './dmRepliedPartners';
 import { loadIdentities, type StoredIdentity } from './identitiesStore';
 import * as nostrService from './nostrService';
 import { perAccountKey } from './perAccountStorage';
@@ -76,6 +77,7 @@ export async function storeDecryptedWrap(
   followed: Set<string> | null,
 ): Promise<void> {
   if (!followed) return;
+  await loadRepliedPartners(owner);
   // Lazy: the ingest pulls in group routing and Marmot, which the watch
   // itself shouldn't load just to arm.
   const { ingestInboxWraps } =
@@ -91,7 +93,8 @@ export async function storeDecryptedWrap(
     owner,
     wraps: [{ ...wrap, decoded: rumor }],
     unwrap: (w) => w.decoded,
-    passesFollowGate: (pk) => followed.has(pk.toLowerCase()),
+    // Same gate as the alert: someone we've replied to passes too (#1623).
+    passesFollowGate: (pk) => followed.has(pk.toLowerCase()) || hasRepliedTo(owner, pk),
     isFollowed: (pk) => followed.has(pk.toLowerCase()),
     // Signed out before this started (retired), or while it ran (epoch).
     persistIf: () => !isDmOwnerRetired(owner) && dmOwnerEpoch(owner) === epoch,

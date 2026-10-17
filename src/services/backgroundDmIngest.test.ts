@@ -6,6 +6,11 @@ const mockIngest = jest.fn(async (_params: unknown) => ({}));
 jest.mock('../contexts/dmWrapIngest', () => ({
   ingestInboxWraps: (params: unknown) => mockIngest(params),
 }));
+const mockReplied = new Set<string>();
+jest.mock('./dmRepliedPartners', () => ({
+  loadRepliedPartners: jest.fn(async () => undefined),
+  hasRepliedTo: (_owner: string, pk: string) => mockReplied.has(pk.toLowerCase()),
+}));
 let mockEpoch = 0;
 let mockRetired = false;
 jest.mock('./dmOwnerGuard', () => ({
@@ -78,6 +83,14 @@ describe('storeDecryptedWrap', () => {
     await storeDecryptedWrap(ME, wrap, rumor, new Set([FRIEND]));
     expect(lastIngest().persistIf()).toBe(false);
     mockRetired = false;
+  });
+
+  it('lets someone we replied to through, as the alert gate does (#1623)', async () => {
+    mockReplied.add(STRANGER);
+    await storeDecryptedWrap(ME, wrap, rumor, new Set([FRIEND]));
+    expect(lastIngest().passesFollowGate(STRANGER)).toBe(true);
+    mockReplied.clear();
+    expect(lastIngest().passesFollowGate(STRANGER)).toBe(false);
   });
 
   it('stores nothing without a contacts cache (the refresh applies the gate)', async () => {
