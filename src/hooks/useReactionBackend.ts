@@ -45,16 +45,19 @@ export function useReactionBackend(
   /** Our own public DM reactions from earlier builds (NIP-17 threads only). */
   fetchOwnPublicDmReactions: () => Promise<ChatReactionEvent[]> = noOwnReactions,
 ): Backend {
-  // Latest send / read functions without rebuilding the backend (and
-  // re-subscribing) whenever their identity changes, e.g. on a relay-list update.
+  // Latest send / read / relay functions without rebuilding the source (and
+  // re-subscribing, re-reading) whenever their identity changes, e.g. on a
+  // relay-list update.
   const sendRef = useRef(sendDirectRumor);
   const ownRef = useRef(fetchOwnPublicDmReactions);
+  const relayRef = useRef(relayBackend);
   useEffect(() => {
     sendRef.current = sendDirectRumor;
     ownRef.current = fetchOwnPublicDmReactions;
-  }, [sendDirectRumor, fetchOwnPublicDmReactions]);
-  return useMemo(() => {
-    if (!myPubkey) return relayBackend;
+    relayRef.current = relayBackend;
+  }, [sendDirectRumor, fetchOwnPublicDmReactions, relayBackend]);
+  const own = useMemo<Backend | null>(() => {
+    if (!myPubkey) return null;
     if (protocol === 'marmot') {
       const marmot = marmotReactionSource(myPubkey, peerPubkey);
       return {
@@ -73,8 +76,8 @@ export function useReactionBackend(
           (await sendRef.current([peerPubkey], rumor, { protocol: 'nip17' })).success,
         publicReactions: {
           fetchOwnDmReactions: () => ownRef.current(),
-          fetchReactionDeletions: relayBackend.fetchReactionDeletions,
-          deleteReaction: relayBackend.deleteReaction,
+          fetchReactionDeletions: (ids) => relayRef.current.fetchReactionDeletions(ids),
+          deleteReaction: (id) => relayRef.current.deleteReaction(id),
         },
       });
       return {
@@ -85,8 +88,9 @@ export function useReactionBackend(
         subscribeLiveReactions: nip17.subscribe,
       };
     }
-    return relayBackend;
-  }, [protocol, myPubkey, peerPubkey, relayBackend]);
+    return null;
+  }, [protocol, myPubkey, peerPubkey]);
+  return own ?? relayBackend;
 }
 
 /** A 1:1 thread's reaction backend, wired to the signed-in account. */

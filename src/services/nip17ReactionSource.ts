@@ -104,16 +104,16 @@ export function nip17ReactionSource(deps: Nip17ReactionDeps): Nip17ReactionSourc
       (e) => e.kind === kind,
     );
 
-  // Our own public reactions, read once per thread open. Never rejects; a
-  // failed read isn't kept, so the next fetch tries again.
-  let ownPublic: Promise<ChatReactionEvent[]> | null = null;
+  // Our own public reactions, read once per thread open. Never rejects: null
+  // means the read failed (not kept, so the next call tries again).
+  let ownPublic: Promise<ChatReactionEvent[] | null> | null = null;
   const ownPublicReactions = () =>
     (ownPublic ??= deps.publicReactions
       .fetchOwnDmReactions()
       .then((events) => events.filter((e) => e.pubkey.toLowerCase() === me))
       .catch(() => {
         ownPublic = null;
-        return [];
+        return null;
       }));
 
   // Store our own reaction / retraction before sending it, so it survives a
@@ -158,7 +158,7 @@ export function nip17ReactionSource(deps: Nip17ReactionDeps): Nip17ReactionSourc
         return ids.length > 0 && wanted.has(ids[ids.length - 1]);
       };
       void ownPublicReactions().then(async (all) => {
-        const reactions = all.filter(targets);
+        const reactions = (all ?? []).filter(targets);
         if (reactions.length === 0) return;
         for (const e of reactions) publicIds.add(e.id.toLowerCase());
         const retractions = await deps.publicReactions
@@ -189,11 +189,12 @@ export function nip17ReactionSource(deps: Nip17ReactionDeps): Nip17ReactionSourc
       // open has read our older public ones: wait for that read before
       // deciding it was never public. (A public kind 5 for a wrapped
       // reaction would publish its private id, so only a confirmed one.)
-      if (
-        !publicIds.has(id) &&
-        (await ownPublicReactions()).some((e) => e.id.toLowerCase() === id)
-      ) {
-        publicIds.add(id);
+      if (!publicIds.has(id)) {
+        const own = await ownPublicReactions();
+        // Can't tell whether it was public: report a failure so it can be
+        // retried, rather than leave a public reaction behind.
+        if (own === null) return false;
+        if (own.some((e) => e.id.toLowerCase() === id)) publicIds.add(id);
       }
       if (!publicIds.has(id)) return wrapped !== null;
       // An older public reaction: it only counts as removed once relays have

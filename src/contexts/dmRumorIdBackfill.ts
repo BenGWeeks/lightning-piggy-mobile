@@ -26,7 +26,9 @@ export async function fetchWrapsByIds(
     pool,
     relays,
     { kinds: [1059], ids, limit: ids.length },
-    { maxWait: 4000, signal },
+    // Rejects when no relay answers (offline, all timed out), so the caller
+    // releases the ids for a later open instead of treating them as gone.
+    { maxWait: 4000, signal, completedRelays: new Set<string>() },
   );
   return events as RawGiftWrapEvent[];
 }

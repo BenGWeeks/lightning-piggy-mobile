@@ -292,6 +292,20 @@ describe('sending', () => {
     deps.publicReactions.deleteReaction.mockResolvedValueOnce(false);
     expect(await source.deleteReaction(legacyId)).toBe(false);
   });
+
+  it("reports a failure when it can't tell whether the reaction was public", async () => {
+    const legacyId = '8'.repeat(64);
+    const deps = makeDeps();
+    deps.publicReactions.fetchOwnDmReactions.mockRejectedValueOnce(new Error('relays down'));
+    const source = nip17ReactionSource(deps);
+    // Unknown: retryable, rather than leave a public reaction on the relays.
+    expect(await source.deleteReaction(legacyId)).toBe(false);
+    deps.publicReactions.fetchOwnDmReactions.mockResolvedValueOnce([
+      { id: legacyId, pubkey: ME, kind: 7, content: '👍', created_at: 1, tags: [['e', MSG]] },
+    ] as never[]);
+    expect(await source.deleteReaction(legacyId)).toBe(true);
+    expect(deps.publicReactions.deleteReaction).toHaveBeenCalledWith(legacyId);
+  });
 });
 
 describe('live', () => {
