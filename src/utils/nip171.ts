@@ -190,6 +190,8 @@ export interface Nip171Rumor {
   created_at: number;
   tags: string[][];
   content: string;
+  /** Group rumors must be unsigned: a signed one could be republished. */
+  sig?: string;
 }
 
 export type Nip171Incoming =
@@ -225,6 +227,7 @@ export function classifyGroupRumor(
 ): Nip171Incoming {
   const sender = rumor.pubkey.toLowerCase();
   if (!HEX64.test(sender)) return { type: 'invalid', reason: 'sender' };
+  if (rumor.sig) return { type: 'invalid', reason: 'signed' };
   if (context.knownEpochPubkeys.has(sender)) return { type: 'invalid', reason: 'epoch-author' };
   const p = exactlyOne(rumor.tags, 'p');
   const h = exactlyOne(rumor.tags, 'h');
@@ -237,6 +240,10 @@ export function classifyGroupRumor(
   if (sender === context.groupPubkey) {
     if (rumor.kind !== 14 || (rumor.content !== '+' && rumor.content !== '-')) {
       return { type: 'invalid', reason: 'group-message' };
+    }
+    // The group key holds no ticket, so an announcement carries no proof.
+    if (rumor.tags.some((t) => t[0] === 'invited_at' || t[0] === 'invitation_proof')) {
+      return { type: 'invalid', reason: 'announcement' };
     }
     const members = tagsNamed(rumor.tags, 'member')
       .map((t) => t[1]?.toLowerCase())

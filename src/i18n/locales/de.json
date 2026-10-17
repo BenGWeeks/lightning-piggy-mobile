@@ -3492,6 +3492,10 @@
     "licenceType": "MIT",
     "lightningAddress": "Lightning-Adresse (LUD-16)"
   },
+  "nip171Invitation": {
+    "group": "NIP-171-Gruppe",
+    "full": "Du hast die maximale Anzahl an NIP-171-Gruppen erreicht. Verlasse eine, um diese Einladung anzunehmen."
+  },
   "marmotInvitation": {
     "pending": "Einladung ausstehend",
     "accept": "Annehmen",

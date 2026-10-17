@@ -217,4 +217,20 @@ describe('classifyGroupRumor', () => {
       type: 'invalid',
     });
   });
+
+  it('rejects a signed member message and an announcement carrying a proof', () => {
+    const tags = groupRumorTags(keys, EPOCH_PUB);
+    expect(
+      classify({ kind: 14, pubkey: ME, created_at: 5, tags, content: 'hi', sig: 'f'.repeat(128) }),
+    ).toMatchObject({ type: 'invalid', reason: 'signed' });
+    expect(
+      classify({
+        kind: 14,
+        pubkey: GROUP,
+        created_at: 5,
+        tags: [...tags, ['member', ME]],
+        content: '+',
+      }),
+    ).toMatchObject({ type: 'invalid', reason: 'announcement' });
+  });
 });

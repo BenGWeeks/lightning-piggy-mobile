@@ -1,9 +1,13 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { hexToBytes } from '@noble/hashes/utils.js';
 import { getPublicKey } from 'nostr-tools/pure';
 import { nostrGetEventHash, nostrVerifyEvent } from './nostrCrypto';
 import { deleteNip171Group, loadNip171Tickets, saveNip171Ticket } from './nip171Store';
-import { perAccountKey } from './perAccountStorage';
+import {
+  nip171MetaStore,
+  nip171StatusStore,
+  type Nip171GroupMeta,
+  type Nip171GroupStatus,
+} from './nip171Membership';
 import type { Group } from '../types/groups';
 import {
   groupKeysFromTickets,
@@ -16,16 +20,20 @@ import {
   type Nip171Ticket,
 } from '../utils/nip171';
 
-// NIP-171 groups this account belongs to, member side: built from the epoch
-// tickets we hold (nip171Store). Groups appear in GroupsContext alongside
-// NIP-17 and Marmot groups; nip171Session receives their messages.
+export type { Nip171GroupMeta } from './nip171Membership';
 
-export interface Nip171GroupMeta {
-  name?: string;
-  picture?: string;
-  /** The group identity's kind-10050 DM relays: where its messages go. */
-  relays?: string[];
-}
+// NIP-171 groups this account belongs to, member side, built from the epoch
+// tickets we hold (nip171Store). A ticket's seal comes from the group key, not
+// from a person we could check against our follows, so a group is an
+// invitation until the user accepts it: only accepted groups are subscribed
+// to, have their profile fetched, or appear in GroupsContext. Declining or
+// leaving is remembered, so the same tickets don't bring the group back; a
+// newer ticket (a re-invite) is a new invitation.
+
+/** Groups the account can be in at once (Anagram's limit). */
+export const NIP171_MAX_GROUPS = 100;
+/** Unanswered invitations kept; more are dropped, so strangers can't flood. */
+export const NIP171_MAX_PENDING = 20;
 
 export interface Nip171GroupState {
   keys: Nip171GroupKeys;
@@ -40,10 +48,23 @@ export interface Nip171GroupState {
   joinedAt: number;
 }
 
-const META_KEY = 'nip171_group_meta_v1';
-const states = new Map<string, Map<string, Nip171GroupState>>();
+/** A group whose ticket we hold but haven't accepted. */
+export interface Nip171Invitation {
+  groupPubkey: string;
+  /** Newest ticket `created_at`, seconds. */
+  invitedAt: number;
+}
+
+interface OwnerState {
+  groups: Map<string, Nip171GroupState>;
+  invitations: Nip171Invitation[];
+  status: Record<string, Nip171GroupStatus>;
+}
+
+const owners = new Map<string, OwnerState>();
 const loads = new Map<string, Promise<void>>();
 const listeners = new Set<(owner: string) => void>();
+const EMPTY_INVITATIONS: Nip171Invitation[] = [];
 
 const emit = (owner: string) => {
   for (const listener of listeners) {
@@ -55,7 +76,7 @@ const emit = (owner: string) => {
   }
 };
 
-/** Notified when an account's NIP-171 groups (or their keys) change. */
+/** Notified when an account's NIP-171 groups, keys or invitations change. */
 export function subscribeNip171Groups(listener: (owner: string) => void): () => void {
   listeners.add(listener);
   return () => {
@@ -71,33 +92,35 @@ const epochPubkeyOf = (secretHex: string) => getPublicKey(hexToBytes(secretHex))
 const hash = (event: Omit<Nip171Event, 'id' | 'sig'>) =>
   nostrGetEventHash(event as Parameters<typeof nostrGetEventHash>[0]);
 
-async function loadMeta(owner: string): Promise<Record<string, Nip171GroupMeta>> {
-  try {
-    const raw = await AsyncStorage.getItem(perAccountKey(META_KEY, owner));
-    const parsed: unknown = raw ? JSON.parse(raw) : null;
-    return parsed && typeof parsed === 'object' ? (parsed as Record<string, Nip171GroupMeta>) : {};
-  } catch {
-    return {};
-  }
-}
+const newest = (list: readonly Nip171Ticket[]) => Math.max(...list.map((t) => t.createdAt));
 
-function buildStates(
+function build(
   tickets: readonly Nip171Ticket[],
   meta: Record<string, Nip171GroupMeta>,
-  previous: Map<string, Nip171GroupState> | undefined,
-): Map<string, Nip171GroupState> {
+  status: Record<string, Nip171GroupStatus>,
+  previous: OwnerState | undefined,
+): OwnerState {
   const byGroup = new Map<string, Nip171Ticket[]>();
   for (const t of tickets) {
     const list = byGroup.get(t.groupPubkey) ?? [];
     list.push(t);
     byGroup.set(t.groupPubkey, list);
   }
-  const next = new Map<string, Nip171GroupState>();
+  const groups = new Map<string, Nip171GroupState>();
+  const invitations: Nip171Invitation[] = [];
   for (const [groupPubkey, list] of byGroup) {
+    const decision = status[groupPubkey];
+    if (decision?.status !== 'accepted') {
+      // Declined / left: only a newer ticket is a new invitation.
+      if (!decision || newest(list) > decision.at) {
+        invitations.push({ groupPubkey, invitedAt: newest(list) });
+      }
+      continue;
+    }
     const keys = groupKeysFromTickets(list);
     if (!keys) continue;
-    const old = previous?.get(groupPubkey);
-    next.set(groupPubkey, {
+    const old = previous?.groups.get(groupPubkey);
+    groups.set(groupPubkey, {
       keys,
       epochPubkey: epochPubkeyOf(keys.current.epochSecretHex),
       epochPubkeys: new Set([...keys.epochSecrets.values()].map(epochPubkeyOf)),
@@ -106,12 +129,17 @@ function buildStates(
       joinedAt: Math.min(...list.map((t) => t.createdAt)) * 1000,
     });
   }
-  return next;
+  invitations.sort((a, b) => b.invitedAt - a.invitedAt);
+  return { groups, invitations, status };
 }
 
 async function reload(owner: string): Promise<void> {
-  const [tickets, meta] = await Promise.all([loadNip171Tickets(owner), loadMeta(owner)]);
-  states.set(owner, buildStates(tickets, meta, states.get(owner)));
+  const [tickets, meta, status] = await Promise.all([
+    loadNip171Tickets(owner),
+    nip171MetaStore.read(owner),
+    nip171StatusStore.read(owner),
+  ]);
+  owners.set(owner, build(tickets, meta, status, owners.get(owner)));
   emit(owner);
 }
 
@@ -127,16 +155,21 @@ export function loadNip171Groups(owner: string): Promise<void> {
   return load;
 }
 
-/** The account's NIP-171 groups, by group identity pubkey. */
+/** The account's accepted NIP-171 groups, by group identity pubkey. */
 export function nip171GroupStates(owner: string): ReadonlyMap<string, Nip171GroupState> {
-  return states.get(owner) ?? new Map();
+  return owners.get(owner)?.groups ?? new Map();
 }
 
 export function nip171GroupState(owner: string, groupPubkey: string): Nip171GroupState | null {
-  return states.get(owner)?.get(groupPubkey) ?? null;
+  return owners.get(owner)?.groups.get(groupPubkey) ?? null;
 }
 
-/** App `Group` rows for GroupsContext. */
+/** Unanswered invitations, newest first. Stable between changes. */
+export function nip171Invitations(owner: string | null): Nip171Invitation[] {
+  return (owner && owners.get(owner)?.invitations) || EMPTY_INVITATIONS;
+}
+
+/** App `Group` rows for GroupsContext (accepted groups only). */
 export function nip171GroupsFor(owner: string): Group[] {
   return [...nip171GroupStates(owner)].map(([groupPubkey, s]) => ({
     id: nip171GroupId(groupPubkey),
@@ -151,6 +184,7 @@ export function nip171GroupsFor(owner: string): Group[] {
 /**
  * A gift-wrapped `kind:1014` ticket that reached our own inbox. Returns true
  * when the rumor was a ticket, valid or not, so the DM inbox never shows it.
+ * A valid ticket for a group we haven't accepted becomes an invitation.
  */
 export async function ingestNip171Ticket(
   owner: string,
@@ -158,28 +192,79 @@ export async function ingestNip171Ticket(
 ): Promise<boolean> {
   if (rumor.kind !== NIP171_TICKET_KIND) return false;
   const ticket = parseTicket({ ...rumor, id: '' }, owner, verify, hash, epochPubkeyOf);
-  if (!ticket) {
-    if (__DEV__) console.log('[NIP-171] ticket rejected');
-    return true;
-  }
+  if (!ticket) return true;
   await loadNip171Groups(owner).catch(() => undefined);
+  const state = owners.get(owner);
+  const decision = state?.status[ticket.groupPubkey];
+  if (decision && decision.status !== 'accepted' && ticket.createdAt <= decision.at) return true;
+  const known =
+    decision?.status === 'accepted' ||
+    state?.invitations.some((i) => i.groupPubkey === ticket.groupPubkey);
+  if (!known && (state?.invitations.length ?? 0) >= NIP171_MAX_PENDING) return true;
   await saveNip171Ticket(owner, ticket);
   await reload(owner);
   return true;
 }
 
-/** Remember members we've seen post or be announced. */
-export function noteNip171Members(owner: string, groupPubkey: string, members: string[]): void {
-  const state = states.get(owner)?.get(groupPubkey);
+async function decide(
+  owner: string,
+  groupPubkey: string,
+  status: Nip171GroupStatus['status'],
+): Promise<void> {
+  const tickets = (await loadNip171Tickets(owner)).filter((t) => t.groupPubkey === groupPubkey);
+  const at = tickets.length ? newest(tickets) : Math.floor(Date.now() / 1000);
+  await nip171StatusStore.update(owner, (all) => {
+    all[groupPubkey] = { status, at };
+  });
+  if (status !== 'accepted') {
+    // Declined or left: the keys go; the record keeps the tickets out.
+    await deleteNip171Group(owner, groupPubkey);
+    await nip171MetaStore.update(owner, (all) => {
+      delete all[groupPubkey];
+    });
+  }
+  await reload(owner);
+}
+
+/** Join an invited group. False when the account is at the group limit. */
+export async function acceptNip171Invitation(owner: string, groupPubkey: string): Promise<boolean> {
+  await loadNip171Groups(owner);
+  if (nip171GroupStates(owner).size >= NIP171_MAX_GROUPS) return false;
+  await decide(owner, groupPubkey, 'accepted');
+  return true;
+}
+
+export function declineNip171Invitation(owner: string, groupPubkey: string): Promise<void> {
+  return decide(owner, groupPubkey, 'declined');
+}
+
+/** Drop a group we left: its keys and metadata, remembering the decision. */
+export function forgetNip171Group(owner: string, groupPubkey: string): Promise<void> {
+  return decide(owner, groupPubkey, 'left');
+}
+
+function changeMembers(owner: string, groupPubkey: string, members: string[], add: boolean): void {
+  const state = owners.get(owner)?.groups.get(groupPubkey);
   if (!state) return;
   let changed = false;
   for (const m of members) {
-    if (!state.members.has(m)) {
-      state.members.add(m);
+    if (state.members.has(m) !== add) {
+      if (add) state.members.add(m);
+      else state.members.delete(m);
       changed = true;
     }
   }
   if (changed) emit(owner);
+}
+
+/** Remember members we've seen post or be announced. */
+export function noteNip171Members(owner: string, groupPubkey: string, members: string[]): void {
+  changeMembers(owner, groupPubkey, members, true);
+}
+
+/** Members the owner announced as gone. */
+export function removeNip171Members(owner: string, groupPubkey: string, members: string[]): void {
+  changeMembers(owner, groupPubkey, members, false);
 }
 
 /** Store the group identity's profile / relays (fetched by the session). */
@@ -188,40 +273,26 @@ export async function setNip171GroupMeta(
   groupPubkey: string,
   meta: Nip171GroupMeta,
 ): Promise<void> {
-  const all = await loadMeta(owner);
-  all[groupPubkey] = { ...all[groupPubkey], ...meta };
-  await AsyncStorage.setItem(perAccountKey(META_KEY, owner), JSON.stringify(all)).catch(
-    () => undefined,
-  );
-  const state = states.get(owner)?.get(groupPubkey);
+  const all = await nip171MetaStore.update(owner, (blob) => {
+    blob[groupPubkey] = { ...blob[groupPubkey], ...meta };
+  });
+  const state = owners.get(owner)?.groups.get(groupPubkey);
   if (state) {
     state.meta = all[groupPubkey];
     emit(owner);
   }
 }
 
-/** Drop a group we left: its tickets and metadata. */
-export async function forgetNip171Group(owner: string, groupPubkey: string): Promise<void> {
-  await deleteNip171Group(owner, groupPubkey);
-  const all = await loadMeta(owner);
-  delete all[groupPubkey];
-  await AsyncStorage.setItem(perAccountKey(META_KEY, owner), JSON.stringify(all)).catch(
-    () => undefined,
-  );
-  states.get(owner)?.delete(groupPubkey);
-  emit(owner);
-}
-
-/** Account wipe / sign-out: drop the in-memory state. */
-export function forgetNip171Account(owner: string): void {
-  states.delete(owner);
+/** Account wipe / sign-out: drop the in-memory keys and the records. */
+export async function forgetNip171Account(owner: string): Promise<void> {
+  owners.delete(owner);
   loads.delete(owner);
-  void AsyncStorage.removeItem(perAccountKey(META_KEY, owner)).catch(() => undefined);
+  await Promise.all([nip171MetaStore.remove(owner), nip171StatusStore.remove(owner)]);
   emit(owner);
 }
 
 export function __resetNip171GroupsForTests(): void {
-  states.clear();
+  owners.clear();
   loads.clear();
   listeners.clear();
 }
@@ -244,7 +315,7 @@ export function nip171Outgoing(
     }
   | { error: string } {
   const groupPubkey = groupId.startsWith('nip171:') ? groupId.slice('nip171:'.length) : null;
-  const state = groupPubkey ? states.get(owner)?.get(groupPubkey) : undefined;
+  const state = groupPubkey ? owners.get(owner)?.groups.get(groupPubkey) : undefined;
   if (!state) return { error: 'Not a member of this group' };
   if (state.keys.conflicted) {
     return { error: "This group's keys conflict; its owner has to fix them before you can send" };
@@ -262,7 +333,18 @@ export function nip171Outgoing(
   };
 }
 
-/** Whether `pubkey` is the identity of one of the account's NIP-171 groups. */
+/**
+ * Whether `pubkey` is a NIP-171 group identity the account knows: joined,
+ * invited, declined or left. Its 1:1 rumors (our leave request's self-copy,
+ * say) belong to no chat.
+ */
 export function isNip171GroupIdentity(owner: string, pubkey: string): boolean {
-  return states.get(owner)?.has(pubkey.toLowerCase()) ?? false;
+  const pk = pubkey.toLowerCase();
+  const state = owners.get(owner);
+  if (!state) return false;
+  return (
+    state.groups.has(pk) ||
+    pk in state.status ||
+    state.invitations.some((i) => i.groupPubkey === pk)
+  );
 }

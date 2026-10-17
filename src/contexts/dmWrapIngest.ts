@@ -193,7 +193,16 @@ async function ingestInboxWrapsRun<W extends IngestableWrap>(
           return null;
         }
         // NIP-171 tickets and group rumors: not 1:1 DMs (nip171InboxRouting).
-        if (await routeNip171Rumor(rumor, owner)) {
+        let nip171: boolean;
+        try {
+          nip171 = await routeNip171Rumor(rumor, owner);
+        } catch (e) {
+          // Storing a ticket failed: leave the wrap for the next refresh
+          // rather than stop this run or file it as a 1:1 DM.
+          if (__DEV__) console.warn('[NIP-171] inbox routing failed:', e);
+          return null;
+        }
+        if (nip171) {
           if (skipKey) {
             skipSet.add(wrap.id);
             skipSetDirty = true;

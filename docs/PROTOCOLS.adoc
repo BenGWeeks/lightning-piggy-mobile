@@ -172,6 +172,8 @@ Draft NIP: https://github.com/nostr-protocol/nips/pull/2428[nostr-protocol/nips#
 | *Leave request*: a plain NIP-17 `-` to the group identity, sent when we leave; the group's keys are then forgotten here.
 |===
 
+* *Invitations need consent.* A ticket's seal is signed by the group key, not by a person we could check against the follow list, so any key can send one. A valid ticket for a group the user hasn't accepted shows as an invitation in Messages (Accept / Decline). Until it's accepted, nothing about the group is fetched or subscribed to (a lookup would tell relays the user was invited). Declining or leaving is recorded per account with the newest ticket's `created_at`; the same tickets read again are ignored, and only a newer ticket (a re-invite) is a new invitation. At most 20 unanswered invitations are kept and 100 groups joined (Anagram's limit).
+* Group relays from the group identity's kind 10050 are used only if they are `wss://`.
 * The highest-epoch ticket wins; two tickets with different keys for that epoch make the group read-only until the owner rotates.
 * Tickets (they hold epoch private keys) live only in the encrypted local DB (`nip171_tickets`). Tickets an older version filed as 1:1 DM rows ("Unsupported message type") are re-read about 20 s after launch and those rows removed, for local-key accounts; a row whose wrap no relay returns is retried on the next launch.
 * Not yet: files (kind 15) and reactions in NIP-171 groups, renaming, adding or removing members (owner only).

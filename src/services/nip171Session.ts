@@ -8,6 +8,7 @@ import { querySyncAbortable } from './relayQuery';
 import {
   nip171GroupStates,
   noteNip171Members,
+  removeNip171Members,
   setNip171GroupMeta,
   subscribeNip171Groups,
   type Nip171GroupState,
@@ -52,7 +53,11 @@ export async function ingestNip171Wrap(
   );
   if (verdict.type === 'invalid') return 'invalid';
   if (verdict.type === 'announcement') {
-    noteNip171Members(owner, state.keys.groupPubkey, verdict.members);
+    // Relays don't keep order, so a late "+" can follow a "-"; the member
+    // list is a best-effort view either way (the roster isn't published).
+    if (verdict.change === 'left')
+      removeNip171Members(owner, state.keys.groupPubkey, verdict.members);
+    else noteNip171Members(owner, state.keys.groupPubkey, verdict.members);
     return 'announcement';
   }
   // Text messages for now; files (kind 15) and reactions (kind 7) follow.
@@ -96,7 +101,8 @@ async function refreshGroupMeta(owner: string, groupPubkey: string, relays: stri
       }
     }
     const groupRelays = inbox?.tags
-      .filter((t) => t[0] === 'relay' && typeof t[1] === 'string' && /^wss?:\/\//.test(t[1]))
+      // TLS only: these come from a key anyone can create.
+      .filter((t) => t[0] === 'relay' && typeof t[1] === 'string' && /^wss:\/\/[^\s]+$/.test(t[1]))
       .map((t) => t[1])
       .slice(0, 8);
     await setNip171GroupMeta(owner, groupPubkey, {

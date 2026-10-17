@@ -3,9 +3,16 @@ import { wrapEvent } from 'nostr-tools/nip59';
 import { bytesToHex } from '@noble/hashes/utils.js';
 import type { Nip171Ticket } from '../utils/nip171';
 
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   __resetNip171GroupsForTests,
+  acceptNip171Invitation,
+  declineNip171Invitation,
+  forgetNip171Account,
   forgetNip171Group,
+  isNip171GroupIdentity,
+  NIP171_MAX_PENDING,
+  nip171Invitations,
   ingestNip171Ticket,
   loadNip171Groups,
   nip171GroupState,
@@ -47,11 +54,11 @@ const peerSk = generateSecretKey();
 const PEER = getPublicKey(peerSk);
 
 /** An epoch ticket as Anagram sends it: unsigned rumor, signature on the seal. */
-function anagramTicket(member: string, epoch = 0) {
+function anagramTicket(member: string, epoch = 0, createdAt = 1000) {
   const signed = finalizeEvent(
     {
       kind: 1014,
-      created_at: 1000,
+      created_at: createdAt,
       tags: [
         ['p', member],
         ['epoch', String(epoch)],
@@ -64,21 +71,84 @@ function anagramTicket(member: string, epoch = 0) {
   return { kind, created_at, tags, content, pubkey, sealInvitationProof: sig };
 }
 
-beforeEach(() => {
+/** Receive the invitation and accept it. */
+async function join(member: string, ticket = anagramTicket(member)) {
+  await ingestNip171Ticket(member, ticket);
+  expect(await acceptNip171Invitation(member, GROUP)).toBe(true);
+}
+
+beforeEach(async () => {
+  await AsyncStorage.clear();
   mockStore.length = 0;
   mockAppended.length = 0;
   __resetNip171GroupsForTests();
 });
 
 describe('ingestNip171Ticket', () => {
-  it('joins the group from an Anagram ticket', async () => {
+  it('holds an Anagram ticket as an invitation until accepted', async () => {
     await loadNip171Groups(ME);
     expect(await ingestNip171Ticket(ME, anagramTicket(ME))).toBe(true);
-    const state = nip171GroupState(ME, GROUP)!;
-    expect(state.epochPubkey).toBe(EPOCH_PUB);
+    // Not joined: no keys in use, no group row, nothing to subscribe to.
+    expect(nip171GroupState(ME, GROUP)).toBeNull();
+    expect(nip171GroupsFor(ME)).toEqual([]);
+    expect(nip171Invitations(ME)).toEqual([{ groupPubkey: GROUP, invitedAt: 1000 }]);
+    expect(isNip171GroupIdentity(ME, GROUP)).toBe(true);
+
+    expect(await acceptNip171Invitation(ME, GROUP)).toBe(true);
+    expect(nip171GroupState(ME, GROUP)!.epochPubkey).toBe(EPOCH_PUB);
+    expect(nip171Invitations(ME)).toEqual([]);
     expect(nip171GroupsFor(ME)).toEqual([
       expect.objectContaining({ id: `nip171:${GROUP}`, protocol: 'nip171' }),
     ]);
+  });
+
+  it('keeps a declined group out until a newer ticket re-invites', async () => {
+    await ingestNip171Ticket(ME, anagramTicket(ME));
+    await declineNip171Invitation(ME, GROUP);
+    expect(nip171Invitations(ME)).toEqual([]);
+    expect(mockStore).toEqual([]);
+    // The same ticket read again (a refresh) is ignored...
+    await ingestNip171Ticket(ME, anagramTicket(ME));
+    expect(nip171Invitations(ME)).toEqual([]);
+    expect(mockStore).toEqual([]);
+    // ...a newer one is a new invitation.
+    await ingestNip171Ticket(ME, anagramTicket(ME, 1, 2000));
+    expect(nip171Invitations(ME)).toEqual([{ groupPubkey: GROUP, invitedAt: 2000 }]);
+  });
+
+  it('caps unanswered invitations', async () => {
+    for (let i = 0; i < NIP171_MAX_PENDING + 3; i++) {
+      const sk = generateSecretKey();
+      const signed = finalizeEvent(
+        {
+          kind: 1014,
+          created_at: 1000 + i,
+          tags: [
+            ['p', ME],
+            ['epoch', '0'],
+          ],
+          content: bytesToHex(epochSk),
+        },
+        sk,
+      );
+      const { kind, created_at, tags, content, pubkey, sig } = signed;
+      await ingestNip171Ticket(ME, {
+        kind,
+        created_at,
+        tags,
+        content,
+        pubkey,
+        sealInvitationProof: sig,
+      });
+    }
+    expect(nip171Invitations(ME)).toHaveLength(NIP171_MAX_PENDING);
+  });
+
+  it('forgets everything for a wiped account', async () => {
+    await join(ME);
+    await forgetNip171Account(ME);
+    expect(nip171GroupState(ME, GROUP)).toBeNull();
+    expect(isNip171GroupIdentity(ME, GROUP)).toBe(false);
   });
 
   it('swallows an invalid ticket without joining', async () => {
@@ -103,7 +173,7 @@ describe('ingestNip171Ticket', () => {
 describe('nip171Outgoing', () => {
   it('addresses the epoch key with the membership proof', async () => {
     const ticket = anagramTicket(ME);
-    await ingestNip171Ticket(ME, ticket);
+    await join(ME, ticket);
     const out = nip171Outgoing(ME, `nip171:${GROUP}`, 'hi', ['wss://a']);
     if ('error' in out) throw new Error(out.error);
     expect(out.recipientPubkeys).toEqual([EPOCH_PUB]);
@@ -122,18 +192,23 @@ describe('nip171Outgoing', () => {
     });
   });
 
-  it('forgets a group we left', async () => {
-    await ingestNip171Ticket(ME, anagramTicket(ME));
+  it('leaves for good: the same ticket read again does not rejoin', async () => {
+    await join(ME);
     await forgetNip171Group(ME, GROUP);
     expect(nip171GroupsFor(ME)).toEqual([]);
     expect(mockStore).toEqual([]);
+    await ingestNip171Ticket(ME, anagramTicket(ME));
+    expect(nip171GroupsFor(ME)).toEqual([]);
+    expect(nip171Invitations(ME)).toEqual([]);
+    // Our leave request's self-copy still belongs to no 1:1 chat.
+    expect(isNip171GroupIdentity(ME, GROUP)).toBe(true);
   });
 });
 
 describe('ingestNip171Wrap', () => {
   /** A member's message, built the way Anagram builds one. */
   async function memberWrap(senderSk: Uint8Array, proofOverride?: string) {
-    await ingestNip171Ticket(getPublicKey(senderSk), anagramTicket(getPublicKey(senderSk)));
+    await join(getPublicKey(senderSk));
     const sender = nip171GroupState(getPublicKey(senderSk), GROUP)!;
     const tags = [
       ['p', EPOCH_PUB],
@@ -147,7 +222,7 @@ describe('ingestNip171Wrap', () => {
 
   it('stores a member message whose proof verifies', async () => {
     const wrap = await memberWrap(peerSk);
-    await ingestNip171Ticket(ME, anagramTicket(ME));
+    await join(ME);
     const state = nip171GroupState(ME, GROUP)!;
     expect(await ingestNip171Wrap(ME, state, wrap)).toBe('stored');
     expect(mockAppended).toEqual([
@@ -158,13 +233,13 @@ describe('ingestNip171Wrap', () => {
 
   it('drops a message with a forged proof', async () => {
     const wrap = await memberWrap(peerSk, '1'.repeat(128));
-    await ingestNip171Ticket(ME, anagramTicket(ME));
+    await join(ME);
     expect(await ingestNip171Wrap(ME, nip171GroupState(ME, GROUP)!, wrap)).toBe('invalid');
     expect(mockAppended).toEqual([]);
   });
 
   it('applies a member announcement from the group key', async () => {
-    await ingestNip171Ticket(ME, anagramTicket(ME));
+    await join(ME);
     const wrap = wrapEvent(
       {
         kind: 14,
@@ -183,5 +258,22 @@ describe('ingestNip171Wrap', () => {
     const state = nip171GroupState(ME, GROUP)!;
     expect(await ingestNip171Wrap(ME, state, wrap)).toBe('announcement');
     expect(state.members.has(PEER)).toBe(true);
+    const left = wrapEvent(
+      {
+        kind: 14,
+        created_at: 2001,
+        tags: [
+          ['p', EPOCH_PUB],
+          ['h', GROUP],
+          ['epoch', '0'],
+          ['member', PEER],
+        ],
+        content: '-',
+      },
+      groupSk,
+      EPOCH_PUB,
+    );
+    expect(await ingestNip171Wrap(ME, state, left)).toBe('announcement');
+    expect(state.members.has(PEER)).toBe(false);
   });
 });

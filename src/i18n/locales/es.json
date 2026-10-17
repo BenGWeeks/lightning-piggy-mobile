@@ -3492,6 +3492,10 @@
     "licenceType": "MIT",
     "lightningAddress": "Dirección Lightning (LUD-16)"
   },
+  "nip171Invitation": {
+    "group": "Grupo NIP-171",
+    "full": "Ya alcanzaste el límite de grupos NIP-171. Sal de uno para aceptar esta invitación."
+  },
   "marmotInvitation": {
     "pending": "Invitación pendiente",
     "accept": "Aceptar",

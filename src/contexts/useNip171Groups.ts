@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { resolveReadRelays } from '../services/backgroundDmReadRelays';
 import {
   forgetNip171Group,
@@ -37,10 +37,9 @@ export function useNip171Groups(pubkey: string | null): Nip171GroupsApi {
   const [groups, setGroups] = useState<Group[]>([]);
 
   useEffect(() => {
-    if (!pubkey) {
-      setGroups([]);
-      return;
-    }
+    // An account switch must never show the previous account's groups.
+    setGroups(pubkey ? nip171GroupsFor(pubkey) : []);
+    if (!pubkey) return;
     let cancelled = false;
     let stop: (() => void) | null = null;
     let repairTimer: ReturnType<typeof setTimeout> | null = null;
@@ -95,5 +94,5 @@ export function useNip171Groups(pubkey: string | null): Nip171GroupsApi {
     [pubkey],
   );
 
-  return { groups, leave };
+  return useMemo(() => ({ groups, leave }), [groups, leave]);
 }
