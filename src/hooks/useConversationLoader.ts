@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import { filterMessagesByProtocol, type DmProtocol } from '../utils/dmProtocol';
 import { subscribeDmMessages } from '../contexts/nostrEventBus';
+import { subscribeDmStorage } from '../services/dmDb';
 import { keepPendingLocalRows, reconcileDeliveryStatus } from '../contexts/nostrDmCache';
 import type { ConversationMessage } from '../contexts/nostrContextTypes';
 import type { ConversationMessageInput } from '../utils/conversationItems';
@@ -208,14 +209,36 @@ export function useConversationLoader({
           void load(false);
         }, 150);
       });
+      // The live sub announces a message before its store write commits
+      // (#934), so the read above can miss it on a busy cold start, and
+      // nothing announces it again (#1325). Re-read the store, without a
+      // relay fetch, once a write has committed.
+      let storeTimer: ReturnType<typeof setTimeout> | undefined;
+      const unsubscribeStore = subscribeDmStorage(() => {
+        if (storeTimer) return;
+        storeTimer = setTimeout(() => {
+          storeTimer = undefined;
+          void loadInitialConversation(pubkey, protocol)
+            .then((rows) => {
+              if (!isMountedRef.current) return;
+              const stored = filterMessagesByProtocol(rows, protocol);
+              setMessages((prev) =>
+                keepPendingLocalRows(filterMessagesByProtocol(prev, protocol), stored),
+              );
+            })
+            .catch(() => undefined);
+        }, 150);
+      });
       return () => {
         clearTimeout(refreshTimer);
+        clearTimeout(storeTimer);
         unsubscribe();
+        unsubscribeStore();
         // A blurred thread (e.g. kept underneath another protocol's thread)
         // must not keep decrypting or prompting a signer; refocus reloads.
         fetchAbortRef.current?.abort();
       };
-    }, [pubkey, load]),
+    }, [pubkey, protocol, load, loadInitialConversation]),
   );
 
   // Generation guard so overlapping pull-to-refreshes don't drop the spinner

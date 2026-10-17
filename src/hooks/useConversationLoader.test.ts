@@ -17,6 +17,18 @@ jest.mock('@react-navigation/native', () => ({
   },
 }));
 
+// Post-commit store signal (#1325): captured so a test can fire it.
+let mockStorageListener: ((owner: string) => void) | undefined;
+jest.mock('../services/dmDb', () => ({
+  ...jest.requireActual('../services/dmDb'),
+  subscribeDmStorage: (listener: (owner: string) => void) => {
+    mockStorageListener = listener;
+    return () => {
+      mockStorageListener = undefined;
+    };
+  },
+}));
+
 const legacy: ConversationMessage = {
   id: 'legacy',
   text: 'same',
@@ -157,4 +169,21 @@ it('clears deleted cached Marmot messages on a coalesced live reload', async () 
   act(() => notifyDmMessage('peer'));
   await waitFor(() => expect(result.current.messages).toEqual([]));
   expect(result.current.loading).toBe(false);
+});
+
+it('shows a message whose store write commits after its live announcement (#1325)', async () => {
+  const { result, loadInitialConversation } = setup('nip17');
+  await waitFor(() => expect(result.current.messages.map((m) => m.id)).toContain('modern'));
+  const late: ConversationMessage = {
+    ...modern,
+    id: 'late',
+    text: 'sent while closed',
+    createdAt: 5,
+  };
+  loadInitialConversation.mockResolvedValue([legacy, modern, late]);
+  await act(async () => {
+    mockStorageListener?.('owner');
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  });
+  expect(result.current.messages.map((m) => m.id)).toContain('late');
 });
