@@ -1,4 +1,9 @@
-import { selectKnownEventIds, upsertDmMessages, type DmMessageRow } from './dmDb';
+import {
+  selectKnownEventIds,
+  upsertDmMessages,
+  upsertDmMessagesIf,
+  type DmMessageRow,
+} from './dmDb';
 
 // Decrypt-once ingest for NIP-17 gift wraps (#695). This is the heart of the
 // Messages-tab freeze fix: instead of re-walking and re-decrypting the whole
@@ -113,9 +118,12 @@ export async function ingestWraps<W extends IngestableWrap>(
   // dmWrapIngest — those ARE partial-state and #412 intentionally drops them.)
   if (fresh.length > 0 && options.persistIf?.() !== false) {
     // Re-checked inside the write transaction, where a wipe can't slip in.
-    if (options.persistIf) await upsertDmMessages(fresh, { persistIf: options.persistIf });
-    else await upsertDmMessages(fresh);
-    result.ingested = fresh.length;
+    // Re-checked inside the write transaction, where a wipe can't slip in;
+    // only rows actually saved count.
+    const written = options.persistIf
+      ? await upsertDmMessagesIf(fresh, options.persistIf)
+      : (await upsertDmMessages(fresh), true);
+    if (written) result.ingested = fresh.length;
   }
   return result;
 }

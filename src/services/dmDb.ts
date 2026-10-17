@@ -269,22 +269,38 @@ async function upsertOne(tx: Executor, m: DmMessageRow): Promise<void> {
  * matched optimistic local- rows (see `upsertOne`) and never downgrades an
  * existing delivery tick / rumorId to NULL.
  */
-export async function upsertDmMessages(
+export async function upsertDmMessages(rows: readonly DmMessageRow[]): Promise<void> {
+  await writeDmMessages(rows);
+}
+
+/**
+ * `upsertDmMessages` for a write that may outlive its account (a background
+ * save): `persistIf` is checked inside the write transaction, and false writes
+ * nothing. Wipes are transactions too, so a wipe either lands first (and this
+ * sees its epoch) or runs after this write and removes it. Returns whether it
+ * wrote.
+ */
+export function upsertDmMessagesIf(
   rows: readonly DmMessageRow[],
-  /** Checked inside the write transaction; false writes nothing. Wipes are
-   * transactions too, so a wipe either lands first (and this sees its epoch)
-   * or runs after this write and removes it. */
-  options: { persistIf?: () => boolean } = {},
-): Promise<void> {
-  if (rows.length === 0) return;
+  persistIf: () => boolean,
+): Promise<boolean> {
+  return writeDmMessages(rows, persistIf);
+}
+
+async function writeDmMessages(
+  rows: readonly DmMessageRow[],
+  persistIf?: () => boolean,
+): Promise<boolean> {
+  if (rows.length === 0) return false;
   const db = await getLocalDb();
   let written = false;
   await db.transaction(async (tx) => {
-    if (options.persistIf?.() === false) return;
+    if (persistIf?.() === false) return;
     for (const m of rows) await upsertOne(tx as Executor, m);
     written = true;
   });
   if (written) notifyDmStorage(rows);
+  return written;
 }
 
 /** Import a legacy misfiled group row only if neither its wrap nor its rumor

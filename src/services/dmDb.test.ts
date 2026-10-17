@@ -6,6 +6,7 @@ import {
   subscribeDmStorage,
   selectKnownEventIds,
   upsertDmMessages,
+  upsertDmMessagesIf,
   importDmMessages,
   updateDmDeliveryStatuses,
   getConversationMessages,
@@ -88,7 +89,7 @@ describe('dmDb', () => {
     });
 
     it('writes nothing when persistIf fails inside the transaction', async () => {
-      await upsertDmMessages([row({ eventId: 'e1' })], { persistIf: () => false });
+      expect(await upsertDmMessagesIf([row({ eventId: 'e1' })], () => false)).toBe(false);
       expect(mockTransaction).toHaveBeenCalledTimes(1);
       expect(mockExecute).not.toHaveBeenCalled();
     });
