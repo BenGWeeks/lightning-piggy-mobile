@@ -116,6 +116,14 @@ describe('ingestNip171Ticket', () => {
     expect(nip171Invitations(ME)).toEqual([{ groupPubkey: GROUP, invitedAt: 2000 }]);
   });
 
+  it('keeps the keys if the decline cannot be recorded', async () => {
+    await ingestNip171Ticket(ME, anagramTicket(ME));
+    jest.mocked(AsyncStorage.setItem).mockRejectedValueOnce(new Error('full'));
+    await expect(declineNip171Invitation(ME, GROUP)).rejects.toThrow('full');
+    // Nothing deleted without the record that keeps the ticket out.
+    expect(mockStore).toHaveLength(1);
+  });
+
   it('caps unanswered invitations', async () => {
     for (let i = 0; i < NIP171_MAX_PENDING + 3; i++) {
       const sk = generateSecretKey();

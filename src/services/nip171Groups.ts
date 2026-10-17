@@ -219,9 +219,12 @@ async function decide(
   if (status !== 'accepted') {
     // Declined or left: the keys go; the record keeps the tickets out.
     await deleteNip171Group(owner, groupPubkey);
-    await nip171MetaStore.update(owner, (all) => {
-      delete all[groupPubkey];
-    });
+    // Housekeeping only: a stale name / relay list is harmless.
+    await nip171MetaStore
+      .update(owner, (all) => {
+        delete all[groupPubkey];
+      })
+      .catch(() => undefined);
   }
   await reload(owner);
 }

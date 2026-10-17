@@ -24,26 +24,30 @@ export interface Nip171GroupMeta {
 
 function ownerJsonStore<T>(baseKey: string) {
   const chains = new Map<string, Promise<unknown>>();
-  const read = async (owner: string): Promise<Record<string, T>> => {
-    try {
-      const raw = await AsyncStorage.getItem(perAccountKey(baseKey, owner));
-      const parsed: unknown = raw ? JSON.parse(raw) : null;
-      return parsed && typeof parsed === 'object' ? (parsed as Record<string, T>) : {};
-    } catch {
-      return {};
-    }
+  /** Throws on a failed read or a corrupt blob; only a missing one is empty. */
+  const readStrict = async (owner: string): Promise<Record<string, T>> => {
+    const raw = await AsyncStorage.getItem(perAccountKey(baseKey, owner));
+    if (raw == null) return {};
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') throw new Error(`${baseKey}: corrupt record`);
+    return parsed as Record<string, T>;
   };
-  /** Read-modify-write, one at a time per account. Returns the new blob. */
+  /** For display: any failure reads as empty. */
+  const read = (owner: string): Promise<Record<string, T>> => readStrict(owner).catch(() => ({}));
+  /**
+   * Read-modify-write, one at a time per account. Returns the new blob.
+   * Rejects (writing nothing) if the read or the write fails: an empty
+   * stand-in would wipe every other group's record, and these records are
+   * what keep a declined or left group from coming back.
+   */
   const update = (
     owner: string,
     change: (all: Record<string, T>) => void,
   ): Promise<Record<string, T>> => {
     const run = (chains.get(owner) ?? Promise.resolve()).then(async () => {
-      const all = await read(owner);
+      const all = await readStrict(owner);
       change(all);
-      await AsyncStorage.setItem(perAccountKey(baseKey, owner), JSON.stringify(all)).catch(
-        () => undefined,
-      );
+      await AsyncStorage.setItem(perAccountKey(baseKey, owner), JSON.stringify(all));
       return all;
     });
     chains.set(
