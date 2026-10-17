@@ -281,6 +281,13 @@ describe('sending', () => {
     expect(await source.deleteReaction(legacyId)).toBe(true);
     expect(deps.publicReactions.deleteReaction).toHaveBeenCalledWith(legacyId);
 
+    // Removing an older public reaction before the thread's read finished
+    // still deletes it publicly.
+    const fresh = nip17ReactionSource(deps);
+    deps.publicReactions.deleteReaction.mockClear();
+    expect(await fresh.deleteReaction(legacyId)).toBe(true);
+    expect(deps.publicReactions.deleteReaction).toHaveBeenCalledWith(legacyId);
+
     // A failed public delete is a failure: the leaked event is still up.
     deps.publicReactions.deleteReaction.mockResolvedValueOnce(false);
     expect(await source.deleteReaction(legacyId)).toBe(false);

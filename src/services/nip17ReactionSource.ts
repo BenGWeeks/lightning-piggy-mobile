@@ -185,6 +185,16 @@ export function nip17ReactionSource(deps: Nip17ReactionDeps): Nip17ReactionSourc
       const wrapped = await send(
         buildChatReactionDeletionRumor({ myPubkey: me, peerPubkey: peer, reactionEventId: id }),
       ).catch(() => null);
+      // A reaction shown from the thread's cache may be removed before this
+      // open has read our older public ones: wait for that read before
+      // deciding it was never public. (A public kind 5 for a wrapped
+      // reaction would publish its private id, so only a confirmed one.)
+      if (
+        !publicIds.has(id) &&
+        (await ownPublicReactions()).some((e) => e.id.toLowerCase() === id)
+      ) {
+        publicIds.add(id);
+      }
       if (!publicIds.has(id)) return wrapped !== null;
       // An older public reaction: it only counts as removed once relays have
       // been asked to delete it too, so a failure can be retried.
