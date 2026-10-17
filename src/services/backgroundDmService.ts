@@ -89,6 +89,7 @@ import {
   type DecodedRumor,
 } from '../utils/nip17Unwrap';
 import { dmRowPreview } from '../utils/dmRowPreview';
+import { hasRepliedTo } from './dmRepliedPartners';
 import { loadBackgroundDmEnabled } from './backgroundDmPreference';
 import {
   startForegroundService,
@@ -336,7 +337,9 @@ async function handleWrap(input: {
   // legitimately replay and notify for this wrap once follows hydrate.
   if (
     input.followedPubkeys &&
-    !input.followedPubkeys.has(partnership.partnerPubkey.toLowerCase())
+    !input.followedPubkeys.has(partnership.partnerPubkey.toLowerCase()) &&
+    // …unless we've replied to them (#1623), like the live sub.
+    !hasRepliedTo(viewerPubkey, partnership.partnerPubkey)
   ) {
     return;
   }

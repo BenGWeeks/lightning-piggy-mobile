@@ -1,3 +1,4 @@
+import { hasRepliedTo, loadRepliedPartners } from '../services/dmRepliedPartners';
 import { reviveSellerAccount } from '../services/sellerEventStore';
 import { useLiveFollowGate } from './useLiveFollowGate';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -479,7 +480,10 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
       // of the parental-control filter from a single switch.
       const refreshForSigner = signerType;
       const refreshFollows = followPubkeys;
-      const passesFollowGate = (pk: string): boolean => includeNonFollows || refreshFollows.has(pk);
+      // Someone we've replied to passes too (#1623), so their later messages
+      // are stored like a follow's (the Messages list keeps its trust tiers).
+      const passesFollowGate = (pk: string): boolean =>
+        includeNonFollows || refreshFollows.has(pk) || hasRepliedTo(refreshForPubkey, pk);
 
       if (!isStillActive()) return;
       const accountSignal = accountSignalFor(refreshForPubkey);
@@ -497,6 +501,8 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
           // single-flighted per account; after the first call it costs one
           // Map lookup, so firing it on every refresh is safe.
           await ensureDmStoreMigrated(refreshForPubkey);
+          // `passesFollowGate` reads it: people we've replied to pass (#1623).
+          await loadRepliedPartners(refreshForPubkey);
 
           // Cold REBUILD detection (F1, #849). A post-login / post-wipe inbox
           // has an empty store: this sweep is the ONLY thing that will populate
