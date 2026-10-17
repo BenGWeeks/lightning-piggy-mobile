@@ -90,6 +90,7 @@ import {
 } from '../utils/nip17Unwrap';
 import { dmRowPreview } from '../utils/dmRowPreview';
 import { isNip171InboxRumor } from '../contexts/nip171InboxRouting';
+import { hasRepliedTo, loadRepliedPartners } from './dmRepliedPartners';
 import { loadBackgroundDmEnabled } from './backgroundDmPreference';
 import {
   startForegroundService,
@@ -341,7 +342,12 @@ async function handleWrap(input: {
     input.followedPubkeys &&
     !input.followedPubkeys.has(partnership.partnerPubkey.toLowerCase())
   ) {
-    return;
+    // …unless we've replied to them (#1623), like the live sub. Wait for that
+    // set to load so a cold start can't mistake them for a stranger.
+    await loadRepliedPartners(viewerPubkey);
+    // Signed out / switched account meanwhile: not this watch's to alert.
+    if (activeWatch?.viewerPubkey !== viewerPubkey) return;
+    if (!hasRepliedTo(viewerPubkey, partnership.partnerPubkey)) return;
   }
   // Claim BEFORE the async name resolution below — the claim is the
   // synchronous point that closes the race with the foreground live sub
@@ -482,6 +488,10 @@ async function armBackgroundDmWatchOnce(isCurrent: () => boolean): Promise<boole
   // path can't know the sender, so it can't be gated). Loaded once per arm;
   // the 15-min safety re-arm refreshes it as follows change.
   const followedPubkeys = decryptWrap ? await loadFollowedPubkeys(activePubkey) : null;
+  // A headless start has no React tree to load who we've replied to (#1623).
+  // Start it now; the follow gate waits for it before treating anyone as a
+  // stranger.
+  if (decryptWrap) void loadRepliedPartners(activePubkey);
   // Last await before subscribing: from here to `activeWatch` is synchronous,
   // so a stop / identity re-arm can't slip in between check and install.
   if (!isCurrent()) return false;

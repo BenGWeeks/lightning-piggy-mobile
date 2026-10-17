@@ -4,6 +4,7 @@ import { deleteInstallationSignatureKey } from '../services/marmotSignatureKey';
 import { deleteDmMessagesForOwner } from '../services/dmDb';
 import { deleteNip171ForOwner } from '../services/nip171Store';
 import { forgetNip171Account } from '../services/nip171Groups';
+import { forgetRepliedPartners } from '../services/dmRepliedPartners';
 import { perAccountKey } from '../services/perAccountStorage';
 import {
   AMBER_NIP17_CACHE_KEY_BASE,
@@ -63,6 +64,7 @@ export async function wipeDmStoresForAccount(pubkey: string): Promise<void> {
   // upsert resurrect rows and re-set the migration flag after removal (N4).
   await pendingDmStoreMigration(pubkey)?.catch(() => {});
   await forgetNip17GroupHistoryRepair(pubkey).catch(() => {});
+  forgetRepliedPartners(pubkey);
   try {
     await deleteDmMessagesForOwner(pubkey);
   } catch (e) {
