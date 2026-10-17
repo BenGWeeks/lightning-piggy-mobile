@@ -17,6 +17,7 @@ import {
   hasStoredWraps,
   hasConversationWith,
   deleteDmMessagesForOwner,
+  dmOwnerEpoch,
   deleteMarmotMessages,
   type DmMessageRow,
   getConversationForEvent,
@@ -479,6 +480,14 @@ describe('dmDb', () => {
       const [sql, params] = mockExecute.mock.calls[0];
       expect(sql).toContain('DELETE FROM dm_messages WHERE owner = ?');
       expect(params).toEqual([OWNER]);
+    });
+
+    it('changes the owner epoch at once, so an in-flight write can tell', async () => {
+      const before = dmOwnerEpoch(OWNER);
+      const wipe = deleteDmMessagesForOwner(OWNER);
+      expect(dmOwnerEpoch(OWNER)).toBe(before + 1); // before the DELETE resolves
+      await wipe;
+      expect(dmOwnerEpoch(OWNER.toUpperCase())).toBe(before + 1);
     });
   });
 });

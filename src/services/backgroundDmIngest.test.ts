@@ -6,6 +6,8 @@ const mockIngest = jest.fn(async (_params: unknown) => ({}));
 jest.mock('../contexts/dmWrapIngest', () => ({
   ingestInboxWraps: (params: unknown) => mockIngest(params),
 }));
+let mockEpoch = 0;
+jest.mock('./dmDb', () => ({ dmOwnerEpoch: () => mockEpoch }));
 const mockIdentities = jest.fn();
 jest.mock('./identitiesStore', () => ({ loadIdentities: () => mockIdentities() }));
 jest.mock('./backgroundDmReadRelays', () => ({
@@ -38,6 +40,7 @@ const wrap = { id: 'w1', kind: 1059 } as RawGiftWrapEvent;
 const rumor = { pubkey: FRIEND, kind: 14, content: 'hi', tags: [], created_at: 1 } as DecodedRumor;
 
 type IngestParams = {
+  persistIf: () => boolean;
   owner: string;
   wraps: { id: string; decoded: DecodedRumor }[];
   unwrap: (w: { decoded: DecodedRumor }) => DecodedRumor;
@@ -56,6 +59,14 @@ describe('storeDecryptedWrap', () => {
     expect(params.unwrap(params.wraps[0])).toBe(rumor);
     expect(params.passesFollowGate(FRIEND.toUpperCase())).toBe(true);
     expect(params.passesFollowGate(STRANGER)).toBe(false);
+  });
+
+  it("won't save once the account's rows were wiped (sign-out mid-write)", async () => {
+    await storeDecryptedWrap(ME, wrap, rumor, new Set([FRIEND]));
+    const { persistIf } = lastIngest();
+    expect(persistIf()).toBe(true);
+    mockEpoch += 1; // deleteDmMessagesForOwner
+    expect(persistIf()).toBe(false);
   });
 
   it('stores nothing without a contacts cache (the refresh applies the gate)', async () => {

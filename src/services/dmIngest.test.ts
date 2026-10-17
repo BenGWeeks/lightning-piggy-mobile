@@ -53,6 +53,14 @@ describe('dmIngest.ingestWraps', () => {
     expect(mockUpsert.mock.calls[0][0].map((r: DmMessageRow) => r.eventId)).toEqual(['x', 'y']);
   });
 
+  it('saves nothing when persistIf says no (account wiped mid-run)', async () => {
+    const decrypt = jest.fn(async (w: IngestableWrap) => rowFor(w.id));
+    await ingestWraps(OWNER, [wrap('x')], decrypt, { persistIf: () => false });
+    expect(mockUpsert).not.toHaveBeenCalled();
+    await ingestWraps(OWNER, [wrap('y')], decrypt, { persistIf: () => true });
+    expect(mockUpsert).toHaveBeenCalledTimes(1);
+  });
+
   it('counts undecryptable wraps (decryptor returns null) and does not store them', async () => {
     const decrypt = jest.fn(async (w: IngestableWrap) => (w.id === 'bad' ? null : rowFor(w.id)));
     const res = await ingestWraps(OWNER, [wrap('ok'), wrap('bad')], decrypt);

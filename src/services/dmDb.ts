@@ -800,7 +800,17 @@ export async function deleteMarmotMessages(
  * wipe (#848). When the LAST identity signs out, NostrContext additionally
  * calls `wipeLocalDmStore` (localDb) to delete the DB file + keystore key.
  */
+// Bumped (synchronously) whenever an owner's rows are wiped, so a write that
+// started before the wipe can tell it would put rows back (see dmOwnerEpoch).
+const ownerWipeEpochs = new Map<string, number>();
+
+/** Changes when `owner`'s DM rows are wiped (sign-out / account removal). */
+export function dmOwnerEpoch(owner: string): number {
+  return ownerWipeEpochs.get(owner.toLowerCase()) ?? 0;
+}
+
 export async function deleteDmMessagesForOwner(owner: string): Promise<void> {
+  ownerWipeEpochs.set(owner.toLowerCase(), dmOwnerEpoch(owner) + 1);
   const db = await getLocalDb();
   await db.execute(`DELETE FROM dm_messages WHERE owner = ?;`, [owner]);
 }
