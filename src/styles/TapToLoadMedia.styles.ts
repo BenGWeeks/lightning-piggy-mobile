@@ -65,7 +65,9 @@ export const createTapToLoadMediaStyles = (colors: Palette, fromMe: boolean) =>
     },
     boxHost: {
       fontSize: 12,
-      color: colors.textSupplementary,
+      // textBody, not textSupplementary: small text on the light box needs
+      // ≥4.5:1 (supplementary grey on #F5F5F5 is only ~3.2:1).
+      color: colors.textBody,
     },
     labelCentered: {
       textAlign: 'center',
