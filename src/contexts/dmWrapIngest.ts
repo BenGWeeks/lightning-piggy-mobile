@@ -21,6 +21,7 @@ import { tryRouteGroupRumor } from './nostrGroupRouting';
 import { createYieldScheduler, NIP17_LOOP_YIELD_EVERY } from './nostrDecryptPacing';
 import { loadNip17SkipSet, writeNip17SkipSet } from './nostrDmCache';
 import { routeMarmotWelcome } from '../services/marmotWelcomeRouter';
+import { routeNip171Rumor } from './nip171InboxRouting';
 
 // The one NIP-17 inbox-wrap ingest engine (#848). Both refreshDmInbox signer
 // branches (nsec + Amber) and the cold thread-open path in
@@ -185,6 +186,14 @@ async function ingestInboxWrapsRun<W extends IngestableWrap>(
         ) {
           // Only AFTER encrypted invitation persistence succeeds. A v2 skip
           // is a handled Welcome, unlike the legacy v1 follow-gate drops.
+          if (skipKey) {
+            skipSet.add(wrap.id);
+            skipSetDirty = true;
+          }
+          return null;
+        }
+        // NIP-171 tickets and group rumors: not 1:1 DMs (nip171InboxRouting).
+        if (await routeNip171Rumor(rumor, owner)) {
           if (skipKey) {
             skipSet.add(wrap.id);
             skipSetDirty = true;

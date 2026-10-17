@@ -2,6 +2,7 @@ import { forgetNip17GroupHistoryRepair } from './nip17GroupHistoryRepairRunner';
 import { File, Paths } from 'expo-file-system';
 import { deleteInstallationSignatureKey } from '../services/marmotSignatureKey';
 import { deleteDmMessagesForOwner } from '../services/dmDb';
+import { deleteNip171ForOwner } from '../services/nip171Store';
 import { perAccountKey } from '../services/perAccountStorage';
 import {
   AMBER_NIP17_CACHE_KEY_BASE,
@@ -76,6 +77,10 @@ export async function wipeDmStoresForAccount(pubkey: string): Promise<void> {
   } catch (e) {
     if (__DEV__) console.warn('[Marmot] per-owner state wipe failed:', e);
   }
+  // NIP-171 group tickets hold epoch private keys: wipe them independently.
+  await deleteNip171ForOwner(pubkey).catch((e) => {
+    if (__DEV__) console.warn('[NIP-171] per-owner ticket wipe failed:', e);
+  });
   await deleteInstallationSignatureKey(pubkey);
   // Independent of the wipe above: its groups still hold this device's push
   // token (the signer is gone, so no signed removals) — delete the token at

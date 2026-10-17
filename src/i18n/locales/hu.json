@@ -3336,6 +3336,7 @@
     "security": "Protokoll és biztonság",
     "mlsSecurity": "Végpontok közötti titkosítás MLS-sel. Az eszközök megosztják a csoportkulcsokat.",
     "nip17Security": "Végpontok között titkosított üzenetek rejtett feladóazonossággal.",
+    "nip171Security": "Végpontok között titkosított csoport. A tagok közös csoportkulcsot használnak, amelyet a tulajdonos lecserél, ha valaki kilép.",
     "nip04Security": "Régi titkosítás. Válts NIP-17-re a jobb adatvédelemért.",
     "devices": "Eszközök a csevegésben",
     "relays": "A csoport reléi",

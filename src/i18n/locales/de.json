@@ -3336,6 +3336,7 @@
     "security": "Protokoll und Sicherheit",
     "mlsSecurity": "Ende-zu-Ende-Verschlüsselung mit MLS. Geräte teilen die Gruppenschlüssel.",
     "nip17Security": "Ende-zu-Ende-verschlüsselte Nachrichten mit verborgener Absenderidentität.",
+    "nip171Security": "Ende-zu-Ende-verschlüsselte Gruppe. Alle Mitglieder teilen sich einen Gruppenschlüssel. Der Gruppeninhaber ändert ihn, wenn jemand die Gruppe verlässt.",
     "nip04Security": "Veraltete Verschlüsselung. Wechsle für mehr Privatsphäre zu NIP-17.",
     "devices": "Geräte in diesem Chat",
     "relays": "Gruppen-Relays",
