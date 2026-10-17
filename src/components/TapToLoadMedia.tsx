@@ -1,7 +1,7 @@
 import { checkRemoteUrl } from '../utils/remoteUrlPolicy';
 import React, { useMemo } from 'react';
 import { Text, TouchableOpacity, View, type StyleProp, type ViewStyle } from 'react-native';
-import { ImageIcon, Link2 } from 'lucide-react-native';
+import { ImageIcon, Link2, Link2Off } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useLocale } from '../contexts/LocaleContext';
 import { createTapToLoadMediaStyles } from '../styles/TapToLoadMedia.styles';
@@ -52,9 +52,13 @@ const TapToLoadMedia: React.FC<Props> = ({ variant, url, fromMe, testID, onPress
               ? styles.thumbBox
               : styles.textCol,
           style,
+          onLightBox && styles.boxTint,
         ]}
         testID={testID}
       >
+        {onLightBox ? (
+          <Link2Off size={variant === 'thumb' ? 20 : 28} color={colors.brandPink} />
+        ) : null}
         <Text style={onLightBox ? styles.boxLabel : styles.label}>
           {t('messageBubble.blockedLink')}
         </Text>
@@ -64,7 +68,7 @@ const TapToLoadMedia: React.FC<Props> = ({ variant, url, fromMe, testID, onPress
 
   if (variant === 'thumb') {
     return (
-      <View style={styles.thumbBox} testID={testID}>
+      <View style={[styles.thumbBox, styles.boxTint]} testID={testID}>
         <ImageIcon size={20} color={colors.brandPink} />
         <Text style={styles.thumbLabel} numberOfLines={2}>
           {t('messageBubble.tapToLoadImage')}
@@ -75,7 +79,7 @@ const TapToLoadMedia: React.FC<Props> = ({ variant, url, fromMe, testID, onPress
 
   if (variant === 'image') {
     return (
-      <View style={[styles.imageBox, style]} testID={testID}>
+      <View style={[styles.imageBox, style, styles.boxTint]} testID={testID}>
         <ImageIcon size={28} color={colors.brandPink} />
         <Text style={[styles.boxLabel, styles.labelCentered]}>
           {t('messageBubble.tapToLoadImage')}

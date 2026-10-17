@@ -24,10 +24,15 @@ export const createTapToLoadMediaStyles = (colors: Palette, fromMe: boolean) =>
       gap: 10,
     },
     // Image variant: fills the bubble; the caller supplies the bounded aspect.
+    // Pale brand pink with a dashed pink edge, like the file card's "tap to
+    // load": the text stays dark (pink text on this tint is only ~3.9:1).
     imageBox: {
       width: '100%',
       aspectRatio: 1,
-      backgroundColor: colors.background,
+      borderWidth: 1,
+      borderStyle: 'dashed',
+      borderColor: colors.brandPink,
+      borderRadius: 12,
       alignItems: 'center',
       justifyContent: 'center',
       paddingHorizontal: 16,
@@ -41,6 +46,10 @@ export const createTapToLoadMediaStyles = (colors: Palette, fromMe: boolean) =>
       justifyContent: 'center',
       padding: 6,
       gap: 4,
+    },
+    // Applied after the caller's style, which sets its own background.
+    boxTint: {
+      backgroundColor: colors.brandPinkLight,
     },
     thumbLabel: {
       fontSize: 11,
@@ -66,7 +75,7 @@ export const createTapToLoadMediaStyles = (colors: Palette, fromMe: boolean) =>
     boxHost: {
       fontSize: 12,
       // textBody, not textSupplementary: small text on the light box needs
-      // ≥4.5:1 (supplementary grey on #F5F5F5 is only ~3.2:1).
+      // ≥4.5:1 on the pale pink box (supplementary grey falls short).
       color: colors.textBody,
     },
     labelCentered: {
