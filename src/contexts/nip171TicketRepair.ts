@@ -23,7 +23,12 @@ export async function repairMisfiledNip171Tickets(
   repaired.add(owner);
   try {
     const ids = await selectDmEventIdsOfKind(owner, NIP171_TICKET_KIND);
-    if (ids.length === 0 || relays.length === 0) return 0;
+    if (ids.length === 0 || relays.length === 0) {
+      // Nothing to do yet (the store migration may not have run): let a
+      // later mount or account switch try again.
+      repaired.delete(owner);
+      return 0;
+    }
     const wraps = (await querySyncAbortable(
       pool,
       relays,

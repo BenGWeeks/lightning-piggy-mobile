@@ -1,4 +1,4 @@
-import { deleteDmMessagesByIds } from '../services/dmDb';
+import { deleteDmMessagesByIds, selectDmEventIdsOfKind } from '../services/dmDb';
 import { querySyncAbortable } from '../services/relayQuery';
 import { repairMisfiledNip171Tickets } from './nip171TicketRepair';
 
@@ -33,6 +33,13 @@ describe('repairMisfiledNip171Tickets', () => {
     (querySyncAbortable as jest.Mock).mockResolvedValueOnce([]);
     expect(await repairMisfiledNip171Tickets('other', key, ['wss://r'])).toBe(0);
     expect(deleteDmMessagesByIds).not.toHaveBeenCalled();
+  });
+
+  it('tries again later when there was nothing to repair yet', async () => {
+    jest.mocked(selectDmEventIdsOfKind).mockResolvedValueOnce([]);
+    expect(await repairMisfiledNip171Tickets('later', key, ['wss://r'])).toBe(0);
+    (querySyncAbortable as jest.Mock).mockResolvedValueOnce([{ id: 'w1' }]);
+    expect(await repairMisfiledNip171Tickets('later', key, ['wss://r'])).toBe(1);
   });
 
   it('runs once per account per session', async () => {
