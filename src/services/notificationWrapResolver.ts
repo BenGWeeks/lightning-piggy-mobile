@@ -75,7 +75,17 @@ export async function resolveWrapConversation(
     if (fetchNow) {
       const fetch = fetchNow;
       fetchNow = undefined;
-      await fetch().catch(() => undefined);
+      // Bounded by the deadline: a stalled fetch mustn't hold the tap past
+      // it. The loop re-checks `shouldStop` straight after.
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      await Promise.race([
+        fetch().catch(() => undefined),
+        new Promise<void>((r) => {
+          timer = setTimeout(r, Math.max(0, deadline - Date.now()));
+        }),
+      ]);
+      clearTimeout(timer);
+      if (Date.now() >= deadline) return null;
       continue;
     }
     if (Date.now() + intervalMs > deadline) return null;

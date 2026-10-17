@@ -33,6 +33,16 @@ it('fetches the wrap itself after the first miss instead of waiting on a refresh
   expect(lookup).toHaveBeenCalledTimes(2);
 });
 
+it('does not wait past the deadline for a stalled direct fetch', async () => {
+  const lookup = jest.fn(async () => null);
+  const fetchNow = jest.fn(() => new Promise<void>(() => {})); // never settles
+  const started = Date.now();
+  await expect(
+    resolveWrapConversation(PK, 'wrap', { timeoutMs: 30, intervalMs: 5, lookup, fetchNow }),
+  ).resolves.toBeNull();
+  expect(Date.now() - started).toBeLessThan(1000);
+});
+
 it('gives up after the timeout, or as soon as the result is no longer wanted', async () => {
   const lookup = jest.fn(async () => null);
   await expect(
