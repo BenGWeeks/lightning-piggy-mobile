@@ -80,4 +80,22 @@ describe('useDmInboxDeletions', () => {
     unmount();
     expect(mockListeners.size).toBe(0);
   });
+
+  it('reads finishing out of order never bring back a deleted row', async () => {
+    let finishA!: (rows: DmInboxEntry[]) => void;
+    let finishB!: (rows: DmInboxEntry[]) => void;
+    jest
+      .mocked(loadInboxEntries)
+      .mockImplementationOnce(() => new Promise((r) => (finishA = r)))
+      .mockImplementationOnce(() => new Promise((r) => (finishB = r)));
+    const { result } = renderHook(() =>
+      useHarness('me', [entry('a', 'group', 100), entry('b', 'bob', 90), entry('c', 'cat', 80)]),
+    );
+    await emit('me', ['a']); // A's read starts: the store still has B
+    await emit('me', ['b']);
+    await act(async () => finishB([entry('c', 'cat', 80)])); // newer read first
+    expect(result.current.map((e) => e.id)).toEqual(['c']);
+    await act(async () => finishA([entry('b', 'bob', 90), entry('c', 'cat', 80)])); // stale
+    expect(result.current.map((e) => e.id)).toEqual(['c']);
+  });
 });
