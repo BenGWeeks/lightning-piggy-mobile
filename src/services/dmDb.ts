@@ -60,6 +60,27 @@ export function subscribeDmStorage(listener: DmStorageListener): () => void {
   };
 }
 
+/** Row deletions, kept apart from upserts so the inbox can drop removed
+ * rows without re-rendering on every write. Fired after the deletes land. */
+type DmDeletionListener = (owner: string, eventIds: readonly string[]) => void;
+const dmDeletionListeners = new Set<DmDeletionListener>();
+export function subscribeDmDeletions(listener: DmDeletionListener): () => void {
+  dmDeletionListeners.add(listener);
+  return () => {
+    dmDeletionListeners.delete(listener);
+  };
+}
+
+function notifyDmDeletions(owner: string, eventIds: readonly string[]): void {
+  for (const listener of dmDeletionListeners) {
+    try {
+      listener(owner, eventIds);
+    } catch {
+      // A consumer failure must not turn a committed delete into a failed one.
+    }
+  }
+}
+
 function notifyDmStorage(rows: readonly DmMessageRow[]): void {
   for (const owner of new Set(rows.map((row) => row.owner))) {
     const ownerRows = rows.filter((row) => row.owner === owner);
@@ -850,4 +871,5 @@ export async function deleteDmMessagesByIds(
     );
   }
   notifyDmStorage(eventIds.map((eventId) => ({ owner, eventId }) as DmMessageRow));
+  notifyDmDeletions(owner, eventIds);
 }
