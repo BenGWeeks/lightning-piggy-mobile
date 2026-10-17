@@ -69,7 +69,7 @@ const reaction = (pubkey: string, emoji: string, at = 200): ChatRumor => ({
 function makeDeps() {
   const sendRumor = jest.fn(async (_rumor: ChatRumor) => true);
   const publicReactions = {
-    fetchOwnDmReactions: jest.fn(async () => [] as never[]),
+    fetchOwnDmReactions: jest.fn(async () => ({ events: [] as never[], complete: true })),
     fetchReactionDeletions: jest.fn(async (_ids: string[]) => [] as never[]),
     deleteReaction: jest.fn(async (_id: string) => true),
   };
@@ -147,7 +147,7 @@ describe('reading wrapped reactions', () => {
     const forged = { ...retraction, id: '6'.repeat(64), pubkey: STRANGER };
     await upsertDmMessages([storedRumorRow(reaction(PEER, '🎉'), 'wrap-r1')]);
     const deps = makeDeps();
-    let answerRelays!: (events: never[]) => void;
+    let answerRelays!: (read: { events: never[]; complete: boolean }) => void;
     deps.publicReactions.fetchOwnDmReactions.mockReturnValueOnce(
       new Promise((resolve) => (answerRelays = resolve)),
     );
@@ -162,7 +162,7 @@ describe('reading wrapped reactions', () => {
     // The relays haven't answered, yet the stored reaction is already back.
     expect((await source.fetchReactionsForMessages([MSG])).map((e) => e.content)).toEqual(['🎉']);
 
-    answerRelays([legacy, elsewhere] as never[]);
+    answerRelays({ events: [legacy, elsewhere] as never[], complete: true });
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(live).toEqual([
       { kind: 7, id: legacy.id },
@@ -274,9 +274,12 @@ describe('sending', () => {
   it('retracts with a wrapped kind 5, and also publicly for an older public reaction', async () => {
     const legacyId = '9'.repeat(64);
     const deps = makeDeps();
-    deps.publicReactions.fetchOwnDmReactions.mockResolvedValue([
-      { id: legacyId, pubkey: ME, kind: 7, content: '👍', created_at: 1, tags: [['e', MSG]] },
-    ] as never[]);
+    deps.publicReactions.fetchOwnDmReactions.mockResolvedValue({
+      events: [
+        { id: legacyId, pubkey: ME, kind: 7, content: '👍', created_at: 1, tags: [['e', MSG]] },
+      ] as never[],
+      complete: true,
+    });
     const source = nip17ReactionSource(deps);
     const wrappedId = 'f'.repeat(64);
 
@@ -315,9 +318,12 @@ describe('sending', () => {
     const source = nip17ReactionSource(deps);
     // Unknown: retryable, rather than leave a public reaction on the relays.
     expect(await source.deleteReaction(legacyId)).toBe(false);
-    deps.publicReactions.fetchOwnDmReactions.mockResolvedValueOnce([
-      { id: legacyId, pubkey: ME, kind: 7, content: '👍', created_at: 1, tags: [['e', MSG]] },
-    ] as never[]);
+    deps.publicReactions.fetchOwnDmReactions.mockResolvedValueOnce({
+      events: [
+        { id: legacyId, pubkey: ME, kind: 7, content: '👍', created_at: 1, tags: [['e', MSG]] },
+      ] as never[],
+      complete: true,
+    });
     expect(await source.deleteReaction(legacyId)).toBe(true);
     expect(deps.publicReactions.deleteReaction).toHaveBeenCalledWith(legacyId);
   });

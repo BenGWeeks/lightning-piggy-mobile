@@ -5,8 +5,8 @@ import { marmotReactionSource } from '../services/marmotReactions';
 import { nip17ReactionSource, type ChatRumor } from '../services/nip17ReactionSource';
 import { fetchOwnDmReactions } from '../services/nostrReactions';
 import { DEFAULT_RELAYS } from '../services/nostrRelayDefaults';
-import { enabledAppRelays } from '../services/appRelayPrefs';
-import type { ChatReactionEvent } from '../utils/nip17Reactions';
+import { enabledAppRelays, loadAppRelayPrefs } from '../services/appRelayPrefs';
+import type { OwnDmReactionsRead } from '../services/legacyDmReactions';
 import type { DmProtocol } from '../utils/dmProtocol';
 import type { UseConversationReactionsParams } from './useConversationReactions';
 
@@ -19,7 +19,8 @@ type Backend = Pick<
   | 'subscribeLiveReactions'
 >;
 
-const noOwnReactions = async (): Promise<ChatReactionEvent[]> => [];
+// Nothing was read, so nothing is known to be empty.
+const noOwnReactions = async (): Promise<OwnDmReactionsRead> => ({ events: [], complete: false });
 
 /** Gift-wraps a rumor to the recipients (NostrContext's `sendDirectRumor`). */
 export type SendChatRumor = (
@@ -43,7 +44,7 @@ export function useReactionBackend(
   relayBackend: Omit<Backend, 'subscribeLiveReactions'>,
   sendDirectRumor: SendChatRumor,
   /** Our own public DM reactions from earlier builds (NIP-17 threads only). */
-  fetchOwnPublicDmReactions: () => Promise<ChatReactionEvent[]> = noOwnReactions,
+  fetchOwnPublicDmReactions: () => Promise<OwnDmReactionsRead> = noOwnReactions,
 ): Backend {
   // Latest send / read / relay functions without rebuilding the source (and
   // re-subscribing, re-reading) whenever their identity changes, e.g. on a
@@ -122,13 +123,20 @@ export function useThreadReactionBackend(
     ],
   );
   // Where earlier builds published our DM reactions: write relays + defaults.
-  const fetchOwnPublic = useCallback(async () => {
-    if (!myPubkey) return [];
+  const fetchOwnPublic = useCallback(async (): Promise<OwnDmReactionsRead> => {
+    if (!myPubkey) return { events: [], complete: false };
+    // Until the app relay prefs load, the defaults read as none: wait for
+    // them, and if they can't load the read is partial.
+    const prefsLoaded = await loadAppRelayPrefs(myPubkey).then(
+      () => true,
+      () => false,
+    );
     const publishRelays = [
       ...relays.filter((r) => r.write).map((r) => r.url),
-      ...enabledAppRelays('default', DEFAULT_RELAYS),
+      ...enabledAppRelays('default', DEFAULT_RELAYS, myPubkey),
     ];
-    return fetchOwnDmReactions(myPubkey, [...new Set(publishRelays)]);
+    const read = await fetchOwnDmReactions(myPubkey, [...new Set(publishRelays)]);
+    return { events: read.events, complete: read.complete && prefsLoaded };
   }, [myPubkey, relays]);
   return useReactionBackend(
     protocol,

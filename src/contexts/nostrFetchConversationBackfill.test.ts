@@ -22,7 +22,7 @@ jest.mock('./dmStoreMigrationRunner', () => ({
 }));
 jest.mock('./dmRumorIdBackfill', () => ({
   backfillThreadRumorIds: jest.fn(async () => new Map()),
-  fetchWrapsByIds: jest.fn(async () => []),
+  fetchWrapsByIds: jest.fn(async () => ({ wraps: [], complete: true })),
 }));
 jest.mock('./nostrSecretKeyCache', () => ({
   ...jest.requireActual('./nostrSecretKeyCache'),

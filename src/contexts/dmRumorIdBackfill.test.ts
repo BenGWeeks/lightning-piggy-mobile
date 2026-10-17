@@ -92,9 +92,10 @@ it('skips wraps that no longer decrypt and writes nothing when aborted', async (
 
 it('fetches the missing wraps by id on a warm store (the thread fetch returned none)', async () => {
   await upsertDmMessages([row('w-old'), row('w-gone')]);
-  const fetchWraps = jest.fn(async (ids: string[]) =>
-    ids.filter((id) => id !== 'w-gone').map(wrap),
-  );
+  const fetchWraps = jest.fn(async (ids: string[]) => ({
+    wraps: ids.filter((id) => id !== 'w-gone').map(wrap),
+    complete: true,
+  }));
   const filled = await backfillThreadRumorIds({
     owner: ME,
     conversation: PEER,
@@ -120,6 +121,28 @@ it('fetches the missing wraps by id on a warm store (the thread fetch returned n
   expect(fetchWraps).toHaveBeenCalledTimes(1);
 });
 
+it('asks again for wraps a partial lookup (some relays unanswered) did not return', async () => {
+  await upsertDmMessages([row('w-old'), row('w-maybe')]);
+  const fetchWraps = jest
+    .fn(async (ids: string[]) => ({ wraps: ids.map(wrap), complete: true }))
+    .mockImplementationOnce(async (ids: string[]) => ({
+      wraps: ids.filter((id) => id === 'w-old').map(wrap),
+      complete: false,
+    }));
+  const run = () =>
+    backfillThreadRumorIds({
+      owner: ME,
+      conversation: PEER,
+      wraps: [],
+      fetchWraps,
+      unwrap: (w) => rumorFor(w.id),
+    });
+  expect([...(await run()).keys()]).toEqual(['w-old']);
+  // w-maybe may sit on the relay that didn't answer: the next open asks again.
+  expect([...(await run()).keys()]).toEqual(['w-maybe']);
+  expect(fetchWraps.mock.calls[1][0]).toEqual(['w-maybe']);
+});
+
 it('reaches older rows past wraps no relay holds', async () => {
   // 101 id-less rows, newest first: the newest 100 are gone from every relay.
   await upsertDmMessages(
@@ -127,7 +150,10 @@ it('reaches older rows past wraps no relay holds', async () => {
       row(`w-${String(i).padStart(3, '0')}`, { createdAt: 1000 - i }),
     ),
   );
-  const fetchWraps = jest.fn(async (ids: string[]) => ids.filter((id) => id === 'w-100').map(wrap));
+  const fetchWraps = jest.fn(async (ids: string[]) => ({
+    wraps: ids.filter((id) => id === 'w-100').map(wrap),
+    complete: true,
+  }));
   const run = () =>
     backfillThreadRumorIds({
       owner: ME,
@@ -146,7 +172,7 @@ it('reaches older rows past wraps no relay holds', async () => {
 it('asks again after the save fails', async () => {
   await upsertDmMessages([row('w-save')]);
   const db = await getLocalDb();
-  const fetchWraps = jest.fn(async (ids: string[]) => ids.map(wrap));
+  const fetchWraps = jest.fn(async (ids: string[]) => ({ wraps: ids.map(wrap), complete: true }));
   const run = () =>
     backfillThreadRumorIds({
       owner: ME,
@@ -171,7 +197,7 @@ it('keeps rows retryable when it could not look anything up (no relays)', async 
     wraps: [],
     unwrap: (w) => rumorFor(w.id),
   });
-  const fetchWraps = jest.fn(async (ids: string[]) => ids.map(wrap));
+  const fetchWraps = jest.fn(async (ids: string[]) => ({ wraps: ids.map(wrap), complete: true }));
   const filled = await backfillThreadRumorIds({
     owner: ME,
     conversation: PEER,

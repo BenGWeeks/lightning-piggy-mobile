@@ -2,7 +2,7 @@
 // #1319 gift-wrapped them). Reading them is a 500-limit relay query to every
 // write relay, so it runs once per account per app session, shared by every
 // NIP-17 thread, rather than on each thread open. An account whose read came
-// back empty gets a marker, and later sessions skip the query for a week:
+// back empty from every relay asked gets a marker, and later sessions skip the query for a week:
 // new accounts never had public DM reactions, and this build makes none.
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -12,6 +12,12 @@ import type { ChatReactionEvent } from '../utils/nip17Reactions';
 
 export const LEGACY_DM_REACTIONS_NONE_KEY_BASE = 'legacy_dm_reactions_none_v1';
 export const LEGACY_DM_REACTIONS_NONE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** Our public DM reactions as read, and whether every intended relay answered. */
+export interface OwnDmReactionsRead {
+  events: ChatReactionEvent[];
+  complete: boolean;
+}
 
 const session = new Map<string, Promise<ChatReactionEvent[] | null>>();
 
@@ -30,7 +36,7 @@ async function hasFreshNoneMarker(pubkey: string): Promise<boolean> {
  */
 export function readOwnLegacyDmReactions(
   pubkey: string,
-  fetch: () => Promise<ChatReactionEvent[]>,
+  fetch: () => Promise<OwnDmReactionsRead>,
 ): Promise<ChatReactionEvent[] | null> {
   const me = pubkey.toLowerCase();
   const cached = session.get(me);
@@ -39,9 +45,11 @@ export function readOwnLegacyDmReactions(
   let read: Promise<ChatReactionEvent[] | null> | undefined = undefined;
   read = (async () => {
     if (await hasFreshNoneMarker(me)) return [];
-    const events = (await fetch()).filter((e) => e.pubkey.toLowerCase() === me);
-    // Still this session's read (not wiped meanwhile): remember an empty one.
-    if (events.length === 0 && session.get(me) === read) {
+    const result = await fetch();
+    const events = result.events.filter((e) => e.pubkey.toLowerCase() === me);
+    // Still this session's read (not wiped meanwhile): remember an empty one,
+    // but only when every relay answered (a partial read can miss some).
+    if (events.length === 0 && result.complete && session.get(me) === read) {
       await AsyncStorage.setItem(markerKey(me), String(Date.now())).catch(() => undefined);
     }
     return events;

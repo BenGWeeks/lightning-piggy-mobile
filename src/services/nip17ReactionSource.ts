@@ -20,7 +20,7 @@ import {
   type DmMessageRow,
 } from './dmDb';
 import { directMessageRumorEventId } from './dmRumorId';
-import { readOwnLegacyDmReactions } from './legacyDmReactions';
+import { readOwnLegacyDmReactions, type OwnDmReactionsRead } from './legacyDmReactions';
 import {
   buildChatReactionDeletionRumor,
   buildChatReactionRumor,
@@ -49,7 +49,7 @@ export interface Nip17ReactionDeps {
   /** Our own public DM reactions from earlier builds, their public retractions,
    * and the public retraction we send when removing one. */
   publicReactions: {
-    fetchOwnDmReactions: () => Promise<ChatReactionEvent[]>;
+    fetchOwnDmReactions: () => Promise<OwnDmReactionsRead>;
     fetchReactionDeletions: (
       ids: string[],
     ) => Promise<{ id: string; pubkey: string; created_at: number; tags: string[][] }[]>;

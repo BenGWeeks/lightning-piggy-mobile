@@ -1,6 +1,7 @@
 import { selectRowsMissingRumorId, setDmRumorIds } from '../services/dmDb';
 import { pool } from '../services/nostrPool';
 import { querySyncAbortable } from '../services/relayQuery';
+import { activeAccountRelays } from '../services/testRelayRouting';
 import type { RawGiftWrapEvent } from '../services/nostrService';
 import { rumorEventId, type DecodedRumor } from '../utils/nip17Unwrap';
 import { createYieldScheduler } from './nostrDecryptPacing';
@@ -12,6 +13,12 @@ export const RUMOR_ID_BACKFILL_CAP = 100;
 // would otherwise be fetched again on every open of its thread.
 const requested = new Map<string, Set<string>>();
 
+/** A lookup's wraps, and whether every relay asked answered it. */
+export interface WrapLookup {
+  wraps: RawGiftWrapEvent[];
+  complete: boolean;
+}
+
 /**
  * Gift wraps by event id. A wrap id is public (it's the outer event, already
  * addressed to us), so this reveals nothing a relay doesn't know.
@@ -20,17 +27,20 @@ export async function fetchWrapsByIds(
   ids: string[],
   relays: string[],
   signal?: AbortSignal,
-): Promise<RawGiftWrapEvent[]> {
-  if (ids.length === 0 || relays.length === 0) return [];
+): Promise<WrapLookup> {
+  if (ids.length === 0 || relays.length === 0) return { wraps: [], complete: true };
+  const completedRelays = new Set<string>();
   const events = await querySyncAbortable(
     pool,
     relays,
     { kinds: [1059], ids, limit: ids.length },
     // Rejects when no relay answers (offline, all timed out), so the caller
     // releases the ids for a later open instead of treating them as gone.
-    { maxWait: 4000, signal, completedRelays: new Set<string>() },
+    { maxWait: 4000, signal, completedRelays },
   );
-  return events as RawGiftWrapEvent[];
+  // Only some relays answered: a wrap missing here may be on one that didn't.
+  const complete = completedRelays.size >= new Set(activeAccountRelays(relays)).size;
+  return { wraps: events as RawGiftWrapEvent[], complete };
 }
 
 /**
@@ -48,7 +58,7 @@ export async function backfillThreadRumorIds(params: {
   owner: string;
   conversation: string;
   wraps: readonly RawGiftWrapEvent[];
-  fetchWraps?: (ids: string[]) => Promise<RawGiftWrapEvent[]>;
+  fetchWraps?: (ids: string[]) => Promise<WrapLookup>;
   unwrap: (wrap: RawGiftWrapEvent) => Promise<DecodedRumor | null> | DecodedRumor | null;
   signal?: AbortSignal;
 }): Promise<Map<string, string>> {
@@ -83,11 +93,13 @@ export async function backfillThreadRumorIds(params: {
     const wanted = new Set(toFetch);
     const more = await params.fetchWraps(toFetch).catch(() => {
       release();
-      return [] as RawGiftWrapEvent[];
+      return { wraps: [], complete: true } as WrapLookup;
     });
-    for (const w of more) {
+    for (const w of more.wraps) {
       if (wanted.delete(w.id)) wraps.push(w);
     }
+    // A partial lookup can't tell gone from unanswered: ask for those again.
+    if (!more.complete) for (const id of wanted) asked.delete(id);
   }
   const sched = createYieldScheduler({ signal, safetyEvery: 8 });
   try {
