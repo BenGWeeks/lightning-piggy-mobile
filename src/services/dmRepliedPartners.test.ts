@@ -14,9 +14,11 @@ import {
   __resetRepliedPartnersForTests,
   forgetRepliedPartners,
   hasRepliedTo,
+  completeSkipSetRecheck,
   loadRepliedPartners,
-  repliedPartnersGeneration,
+  pendingSkipSetRecheck,
 } from './dmRepliedPartners';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const ME = 'a'.repeat(64);
 const ALICE = 'b'.repeat(64);
@@ -37,6 +39,7 @@ const row = (over: Partial<DmMessageRow>): DmMessageRow => ({
 
 beforeEach(async () => {
   __resetRepliedPartnersForTests();
+  await AsyncStorage.clear();
   await (await getLocalDb()).execute('DELETE FROM dm_messages;');
 });
 
@@ -78,12 +81,30 @@ it("doesn't let a read that started before a wipe restore the account", async ()
   expect(hasRepliedTo(ME, ALICE)).toBe(true);
 });
 
-it('changes the generation only when we reply to someone new', async () => {
+it('keeps a skip-set recheck pending across a restart until a refresh completes it', async () => {
   await loadRepliedPartners(ME);
-  const start = repliedPartnersGeneration(ME);
+  expect(pendingSkipSetRecheck(ME)).toBeNull();
   await upsertDmMessages([row({ conversation: ALICE })]);
-  expect(repliedPartnersGeneration(ME)).toBe(start + 1);
-  await upsertDmMessages([row({ conversation: ALICE })]); // same partner again
-  await upsertDmMessages([row({ conversation: BOB, fromMe: false, sender: BOB })]); // received
-  expect(repliedPartnersGeneration(ME)).toBe(start + 1);
+  const first = pendingSkipSetRecheck(ME);
+  expect(first).not.toBeNull();
+  // Same partner again, or a received message: nothing new to recheck.
+  await upsertDmMessages([row({ conversation: ALICE })]);
+  await upsertDmMessages([row({ conversation: BOB, fromMe: false, sender: BOB })]);
+  expect(pendingSkipSetRecheck(ME)).toBe(first);
+
+  // App restart before any refresh ran: the persisted flag brings it back.
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  __resetRepliedPartnersForTests();
+  await loadRepliedPartners(ME);
+  const restored = pendingSkipSetRecheck(ME);
+  expect(restored).not.toBeNull();
+
+  // A reply to someone new while a refresh runs stays pending after it.
+  await upsertDmMessages([row({ conversation: BOB })]);
+  completeSkipSetRecheck(ME, restored!);
+  expect(pendingSkipSetRecheck(ME)).not.toBeNull();
+  completeSkipSetRecheck(ME, pendingSkipSetRecheck(ME)!);
+  expect(pendingSkipSetRecheck(ME)).toBeNull();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(await AsyncStorage.getItem(`dm_replied_skip_recheck_v1_${ME}`)).toBeNull();
 });

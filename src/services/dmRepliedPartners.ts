@@ -1,4 +1,6 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { REPLY_WIRE_KINDS, selectRepliedConversations, subscribeDmStorage } from './dmDb';
+import { perAccountKey } from './perAccountStorage';
 
 // "You replied to them" as a follow-gate pass (#1623). Opening a thread with
 // someone you don't follow shows their messages (the thread fetch bypasses
@@ -14,10 +16,20 @@ const loads = new Map<string, Promise<void>>();
 // Bumped by `forgetRepliedPartners`, so a read that started before an
 // account wipe can't put its result back afterwards.
 const epochs = new Map<string, number>();
-// Bumped each time we reply to someone new: their earlier wraps may sit in
-// the inbox skip-set from when they didn't pass the gate (#1623).
-const generations = new Map<string, number>();
+// Replying to someone new leaves their earlier wraps in the inbox skip-set,
+// rejected from when they didn't pass the gate. A recheck stays pending (and
+// persisted, so a restart keeps it) until a refresh has re-read them. The
+// number changes on every new reply, so finishing an older recheck can't
+// clear a newer one.
+const pendingRecheck = new Map<string, number>();
+let recheckSeq = 0;
+const RECHECK_KEY = 'dm_replied_skip_recheck_v1';
 let unsubscribe: (() => void) | null = null;
+
+function markRecheckPending(owner: string): void {
+  pendingRecheck.set(owner, ++recheckSeq);
+  AsyncStorage.setItem(perAccountKey(RECHECK_KEY, owner), '1').catch(() => undefined);
+}
 
 // Keep the sets current as we send. Rows written before an owner's first load
 // are covered by that load's query.
@@ -31,24 +43,29 @@ function watchSends(): void {
       if (set.has(partner)) continue;
       set.add(partner);
       repliedByOwner.set(owner, set);
-      generations.set(owner, (generations.get(owner) ?? 0) + 1);
+      markRecheckPending(owner);
     }
   });
 }
 
-/** Read who `owner` has replied to from the store. Once per owner; a failed
- * read is retried by the next call. Never rejects. */
+/** Read who `owner` has replied to (and any pending skip-set recheck) from
+ * storage. Once per owner; a failed read is retried by the next call. Never
+ * rejects. */
 export function loadRepliedPartners(owner: string): Promise<void> {
   watchSends();
   const pending = loads.get(owner);
   if (pending) return pending;
   const epoch = epochs.get(owner) ?? 0;
-  const load = selectRepliedConversations(owner)
-    .then((partners) => {
+  const load = Promise.all([
+    selectRepliedConversations(owner),
+    AsyncStorage.getItem(perAccountKey(RECHECK_KEY, owner)).catch(() => null),
+  ])
+    .then(([partners, recheck]) => {
       if ((epochs.get(owner) ?? 0) !== epoch) return;
       const set = repliedByOwner.get(owner) ?? new Set<string>();
       for (const p of partners) set.add(p.toLowerCase());
       repliedByOwner.set(owner, set);
+      if (recheck && !pendingRecheck.has(owner)) pendingRecheck.set(owner, ++recheckSeq);
     })
     .catch(() => {
       if (loads.get(owner) === load) loads.delete(owner);
@@ -62,23 +79,34 @@ export function hasRepliedTo(owner: string, partner: string): boolean {
   return repliedByOwner.get(owner)?.has(partner.toLowerCase()) ?? false;
 }
 
+/** The pending skip-set recheck for `owner`, or null. Pass it back to
+ * `completeSkipSetRecheck` once a refresh has re-read the skip-set. */
+export function pendingSkipSetRecheck(owner: string): number | null {
+  return pendingRecheck.get(owner) ?? null;
+}
+
+/** A refresh re-read the skip-set for `recheck`. A newer reply since keeps
+ * its own recheck pending. */
+export function completeSkipSetRecheck(owner: string, recheck: number): void {
+  if (pendingRecheck.get(owner) !== recheck) return;
+  pendingRecheck.delete(owner);
+  AsyncStorage.removeItem(perAccountKey(RECHECK_KEY, owner)).catch(() => undefined);
+}
+
 /** Forget an account's replies (its DM store was wiped). */
 export function forgetRepliedPartners(owner: string): void {
   repliedByOwner.delete(owner);
   loads.delete(owner);
+  pendingRecheck.delete(owner);
   epochs.set(owner, (epochs.get(owner) ?? 0) + 1);
-}
-
-/** Changes whenever `owner` replies to someone new (see `generations`). */
-export function repliedPartnersGeneration(owner: string): number {
-  return generations.get(owner) ?? 0;
+  AsyncStorage.removeItem(perAccountKey(RECHECK_KEY, owner)).catch(() => undefined);
 }
 
 export function __resetRepliedPartnersForTests(): void {
   repliedByOwner.clear();
   loads.clear();
   epochs.clear();
-  generations.clear();
+  pendingRecheck.clear();
   unsubscribe?.();
   unsubscribe = null;
 }

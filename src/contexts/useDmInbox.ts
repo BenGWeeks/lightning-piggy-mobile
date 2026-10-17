@@ -1,7 +1,8 @@
 import {
+  completeSkipSetRecheck,
   hasRepliedTo,
   loadRepliedPartners,
-  repliedPartnersGeneration,
+  pendingSkipSetRecheck,
 } from '../services/dmRepliedPartners';
 import { reviveSellerAccount } from '../services/sellerEventStore';
 import { useLiveFollowGate } from './useLiveFollowGate';
@@ -224,8 +225,6 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
    * any) and the account it ran for. Drives the cold-start + freshness-TTL
    * gates — see dmRefreshGate. A different account reads as `0`, so its first
    * refresh after a switch is a cold start and isn't TTL-skipped. */
-  // Per account: the replied-partners generation the last refresh saw (#1623).
-  const repliedGenerationRef = useRef(new Map<string, number>());
   const dmInboxLastRefresh = useRef<{
     pubkey: string | null;
     at: number;
@@ -421,13 +420,7 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
       const isColdStart = isColdStartRefresh(lastRefreshAt);
       // dmRefreshGate keeps the cold backfill's TTL bypass independent of
       // user-intent cache bypasses, avoiding decrypt sweeps on restart (#846).
-      // Replying to someone new re-checks the wraps the skip-set holds from
-      // when they didn't pass the gate, so their earlier messages appear (#1623).
-      const repliedGeneration = repliedPartnersGeneration(pubkey);
-      const repliedChanged =
-        (repliedGenerationRef.current.get(pubkey) ?? repliedGeneration) !== repliedGeneration;
-      repliedGenerationRef.current.set(pubkey, repliedGeneration);
-      const bypassSkipSet = shouldBypassSkipSet(opts) || repliedChanged;
+      const bypassSkipSet = shouldBypassSkipSet(opts);
       // Resolve setup before comparing effective cancellation and refresh strength.
       // A refresh in flight for a previous account is ignored here — its
       // writes are dropped by the owner scope, so there's nothing to wait for.
@@ -458,6 +451,8 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
           lastRefreshAt,
           bypassesFreshnessTtl(opts) ||
             widensView ||
+            // A reply's skip-set recheck (#1623) shouldn't wait out the TTL.
+            pendingSkipSetRecheck(pubkey) !== null ||
             (retryAt !== undefined && retryAt <= Date.now()),
           performance.now(),
         )
@@ -515,6 +510,11 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
           await ensureDmStoreMigrated(refreshForPubkey);
           // `passesFollowGate` reads it: people we've replied to pass (#1623).
           await loadRepliedPartners(refreshForPubkey);
+          // Replying to someone new re-reads the wraps the skip-set rejected
+          // before, so their earlier messages appear. Cleared only once this
+          // refresh has actually done it.
+          const skipSetRecheck = pendingSkipSetRecheck(refreshForPubkey);
+          let skipSetRechecked = false;
 
           // Cold REBUILD detection (F1, #849). A post-login / post-wipe inbox
           // has an empty store: this sweep is the ONLY thing that will populate
@@ -702,7 +702,7 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
                   wraps: kind1059,
                   passesFollowGate,
                   isFollowed: (pk) => refreshFollows.has(pk),
-                  bypassSkipSet,
+                  bypassSkipSet: bypassSkipSet || skipSetRecheck !== null,
                   isColdStart,
                   signal: effectiveSignal,
                   onSkip,
@@ -710,6 +710,7 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
                 })
               : null;
           if (nip17) {
+            skipSetRechecked = !effectiveSignal.aborted;
             // No early return on abort: entries is [] when aborted, but
             // nip17Stored counts rows persisted before the abort (F1, #849)
             // and drives the productive-abort commit below.
@@ -793,6 +794,9 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
           // Completion drives TTL and full wrap backfill independently of the
           // history floor. A productive abort still needs another pass.
           refreshCompleted = !effectiveSignal.aborted && kind4Complete;
+          if (refreshCompleted && skipSetRechecked && skipSetRecheck !== null) {
+            completeSkipSetRecheck(refreshForPubkey, skipSetRecheck);
+          }
         } catch (error) {
           if (__DEV__) console.warn('[Nostr] refreshDmInbox failed:', error);
         } finally {
