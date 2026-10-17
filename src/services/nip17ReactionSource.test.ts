@@ -15,6 +15,7 @@ import {
   upsertDmMessages,
   type DmMessageRow,
 } from './dmDb';
+import { forgetOwnLegacyDmReactions } from './legacyDmReactions';
 import { getLocalDb } from './localDb';
 import { nip17ReactionSource, type ChatRumor } from './nip17ReactionSource';
 import { directMessageRumorEventId } from './dmRumorId';
@@ -84,6 +85,8 @@ beforeEach(async () => {
   const db = await getLocalDb();
   await db.execute('DELETE FROM dm_messages;');
   await upsertDmMessages([message]);
+  // The legacy public read is shared per account for the session.
+  await forgetOwnLegacyDmReactions(ME);
 });
 
 describe('reading wrapped reactions', () => {
@@ -179,6 +182,18 @@ describe('reading wrapped reactions', () => {
     await source.fetchReactionsForMessages([MSG]);
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(deps.publicReactions.fetchOwnDmReactions).toHaveBeenCalledTimes(2);
+  });
+
+  it('reads our older public reactions once for every thread this session', async () => {
+    const deps = makeDeps();
+    const first = nip17ReactionSource(deps);
+    const second = nip17ReactionSource({ ...deps, peerPubkey: STRANGER });
+    await first.fetchReactionsForMessages([MSG]);
+    await second.fetchReactionsForMessages([MSG]);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    await nip17ReactionSource(deps).fetchReactionsForMessages([MSG]);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(deps.publicReactions.fetchOwnDmReactions).toHaveBeenCalledTimes(1);
   });
 
   it('keeps stored reactions when the relay read fails', async () => {
@@ -305,6 +320,43 @@ describe('sending', () => {
     ] as never[]);
     expect(await source.deleteReaction(legacyId)).toBe(true);
     expect(deps.publicReactions.deleteReaction).toHaveBeenCalledWith(legacyId);
+  });
+});
+
+describe('retracting our own wrapped reaction', () => {
+  it('skips the public check for a reaction stored in this chat', async () => {
+    const mine = reaction(ME, '❤️');
+    const mineId = directMessageRumorEventId(mine);
+    await upsertDmMessages([storedRumorRow(mine, 'wrap-mine')]);
+    const deps = makeDeps();
+    deps.publicReactions.fetchOwnDmReactions.mockRejectedValue(new Error('relays down'));
+    const source = nip17ReactionSource(deps);
+
+    expect(await source.deleteReaction(mineId)).toBe(true);
+    expect(deps.sendRumor.mock.calls[0][0]).toMatchObject({
+      kind: 5,
+      tags: [
+        ['e', mineId],
+        ['k', '7'],
+        ['p', PEER],
+      ],
+    });
+    expect(deps.publicReactions.fetchOwnDmReactions).not.toHaveBeenCalled();
+    expect(deps.publicReactions.deleteReaction).not.toHaveBeenCalled();
+
+    // The wrapped retraction failing is still a failure.
+    deps.sendRumor.mockResolvedValueOnce(false);
+    expect(await source.deleteReaction(mineId)).toBe(false);
+    expect(deps.publicReactions.fetchOwnDmReactions).not.toHaveBeenCalled();
+  });
+
+  it("still checks relays for a peer's stored reaction id", async () => {
+    const theirs = reaction(PEER, '🎉');
+    await upsertDmMessages([storedRumorRow(theirs, 'wrap-theirs')]);
+    const deps = makeDeps();
+    const source = nip17ReactionSource(deps);
+    expect(await source.deleteReaction(directMessageRumorEventId(theirs))).toBe(true);
+    expect(deps.publicReactions.fetchOwnDmReactions).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -20,6 +20,7 @@ import {
   type DmMessageRow,
 } from './dmDb';
 import { directMessageRumorEventId } from './dmRumorId';
+import { readOwnLegacyDmReactions } from './legacyDmReactions';
 import {
   buildChatReactionDeletionRumor,
   buildChatReactionRumor,
@@ -104,17 +105,14 @@ export function nip17ReactionSource(deps: Nip17ReactionDeps): Nip17ReactionSourc
       (e) => e.kind === kind,
     );
 
-  // Our own public reactions, read once per thread open. Never rejects: null
-  // means the read failed (not kept, so the next call tries again).
-  let ownPublic: Promise<ChatReactionEvent[] | null> | null = null;
+  // Our own public reactions, read once per account per session (shared by
+  // every thread). Never rejects: null means the read failed.
   const ownPublicReactions = () =>
-    (ownPublic ??= deps.publicReactions
-      .fetchOwnDmReactions()
-      .then((events) => events.filter((e) => e.pubkey.toLowerCase() === me))
-      .catch(() => {
-        ownPublic = null;
-        return null;
-      }));
+    readOwnLegacyDmReactions(me, deps.publicReactions.fetchOwnDmReactions);
+  // A reaction of ours stored in this chat was gift-wrapped by this build,
+  // so it was never public. Public ones from older builds aren't stored.
+  const isStoredOwnReaction = async (id: string) =>
+    (await storedEvents(CHAT_REACTION_KIND)).some((e) => e.id === id && e.pubkey === me);
 
   // Store our own reaction / retraction before sending it, so it survives a
   // restart even if the relay echo of our self-copy never arrives. The echo
@@ -182,11 +180,13 @@ export function nip17ReactionSource(deps: Nip17ReactionDeps): Nip17ReactionSourc
       send(buildChatReactionRumor({ myPubkey: me, peerPubkey: peer, ...input })).catch(() => null),
     deleteReaction: async (reactionEventId) => {
       const id = reactionEventId.toLowerCase();
+      const storedOwn = isStoredOwnReaction(id);
       const wrapped = await send(
         buildChatReactionDeletionRumor({ myPubkey: me, peerPubkey: peer, reactionEventId: id }),
       ).catch(() => null);
-      // A reaction shown from the thread's cache may be removed before this
-      // open has read our older public ones: wait for that read before
+      if (!publicIds.has(id) && (await storedOwn)) return wrapped !== null;
+      // A reaction shown from the thread's cache may be removed before the
+      // read of our older public ones has finished: wait for it before
       // deciding it was never public. (A public kind 5 for a wrapped
       // reaction would publish its private id, so only a confirmed one.)
       if (!publicIds.has(id)) {
