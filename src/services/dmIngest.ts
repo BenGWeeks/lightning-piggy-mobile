@@ -113,7 +113,8 @@ export async function ingestWraps<W extends IngestableWrap>(
   // dmWrapIngest — those ARE partial-state and #412 intentionally drops them.)
   if (fresh.length > 0 && options.persistIf?.() !== false) {
     // Re-checked inside the write transaction, where a wipe can't slip in.
-    await upsertDmMessages(fresh, { persistIf: options.persistIf });
+    if (options.persistIf) await upsertDmMessages(fresh, { persistIf: options.persistIf });
+    else await upsertDmMessages(fresh);
     result.ingested = fresh.length;
   }
   return result;
