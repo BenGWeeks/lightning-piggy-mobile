@@ -9,20 +9,24 @@ import { useGroups } from '../contexts/GroupsContext';
  * up on messages that arrived while the app was closed (#1325). This arms the
  * sub, then runs an inbox refresh once the chat has painted. The refresh's
  * own freshness TTL makes it a no-op when Messages refreshed recently; it is
- * aborted if the chat closes first.
+ * aborted if the chat closes first. On a cold start the chat can mount before
+ * sign-in finishes, so it waits for `isLoggedIn`.
  */
-export function useDmCatchUpOnOpen(): void {
+export function useDmCatchUpOnOpen(isLoggedIn: boolean): void {
   const { armLiveDmSub, refreshDmInbox } = useNostrDmInbox();
   const { effectiveWotTier } = useGroups();
   // Latest values, read once when the deferred refresh fires.
   const latest = useRef({ refreshDmInbox, includeNonFollows: effectiveWotTier === 'all' });
-  latest.current = { refreshDmInbox, includeNonFollows: effectiveWotTier === 'all' };
+  useEffect(() => {
+    latest.current = { refreshDmInbox, includeNonFollows: effectiveWotTier === 'all' };
+  }, [refreshDmInbox, effectiveWotTier]);
 
   useEffect(() => {
     armLiveDmSub();
   }, [armLiveDmSub]);
 
   useEffect(() => {
+    if (!isLoggedIn) return;
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | null = null;
     // After the open animation and first paint, like the Messages tab (#731).
@@ -37,5 +41,5 @@ export function useDmCatchUpOnOpen(): void {
       if (timer) clearTimeout(timer);
       controller.abort();
     };
-  }, []);
+  }, [isLoggedIn]);
 }

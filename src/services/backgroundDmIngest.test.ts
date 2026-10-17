@@ -83,6 +83,16 @@ describe('catchUpWrapById', () => {
     expect(lastIngest().passesFollowGate(STRANGER)).toBe(false);
   });
 
+  it('finds an identity stored with an uppercase pubkey', async () => {
+    mockIdentities.mockResolvedValue({
+      identities: [{ pubkey: ME.toUpperCase(), signerType: 'nsec', nsec: 'nsec-me' }],
+    });
+    mockQuery.mockResolvedValue([wrap]);
+    mockUnwrap.mockReturnValue(rumor);
+    await catchUpWrapById(ME, 'w1');
+    expect(lastIngest().wraps[0].id).toBe('w1');
+  });
+
   it('leaves a remote signer, a missing wrap or an undecryptable one to the refresh', async () => {
     mockIdentities.mockResolvedValue({ identities: [{ pubkey: ME, signerType: 'amber' }] });
     await catchUpWrapById(ME, 'w1');

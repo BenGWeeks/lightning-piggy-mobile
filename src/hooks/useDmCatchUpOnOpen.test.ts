@@ -28,7 +28,7 @@ afterEach(() => jest.useRealTimers());
 
 it('arms the live sub and catches up once the chat has painted (#1325)', async () => {
   mockTier = 'all';
-  const { rerender } = renderHook(() => useDmCatchUpOnOpen());
+  const { rerender } = renderHook(() => useDmCatchUpOnOpen(true));
   expect(mockArm).toHaveBeenCalledTimes(1);
   expect(mockRefresh).not.toHaveBeenCalled();
   await act(async () => {
@@ -48,7 +48,7 @@ it('arms the live sub and catches up once the chat has painted (#1325)', async (
 
 it('aborts the catch-up when the chat closes', async () => {
   mockTier = 'friends';
-  const { unmount } = renderHook(() => useDmCatchUpOnOpen());
+  const { unmount } = renderHook(() => useDmCatchUpOnOpen(true));
   await act(async () => {
     await Promise.resolve();
     jest.advanceTimersByTime(120);
@@ -58,4 +58,24 @@ it('aborts the catch-up when the chat closes', async () => {
   expect(signal.aborted).toBe(false);
   unmount();
   expect(signal.aborted).toBe(true);
+});
+
+it('waits for sign-in before catching up (cold start)', async () => {
+  const { rerender } = renderHook(
+    ({ loggedIn }: { loggedIn: boolean }) => useDmCatchUpOnOpen(loggedIn),
+    {
+      initialProps: { loggedIn: false },
+    },
+  );
+  await act(async () => {
+    await Promise.resolve();
+    jest.advanceTimersByTime(500);
+  });
+  expect(mockRefresh).not.toHaveBeenCalled();
+  rerender({ loggedIn: true });
+  await act(async () => {
+    await Promise.resolve();
+    jest.advanceTimersByTime(120);
+  });
+  expect(mockRefresh).toHaveBeenCalledTimes(1);
 });

@@ -213,14 +213,19 @@ export function useConversationLoader({
       // (#934), so the read above can miss it on a busy cold start, and
       // nothing announces it again (#1325). Re-read the store, without a
       // relay fetch, once a write has committed.
+      // Only the newest read may apply, and only while this focus lasts: an
+      // older read resolving late would drop the newer message again.
       let storeTimer: ReturnType<typeof setTimeout> | undefined;
+      let storeRead = 0;
+      let focused = true;
       const unsubscribeStore = subscribeDmStorage(() => {
         if (storeTimer) return;
         storeTimer = setTimeout(() => {
           storeTimer = undefined;
+          const read = ++storeRead;
           void loadInitialConversation(pubkey, protocol)
             .then((rows) => {
-              if (!isMountedRef.current) return;
+              if (!isMountedRef.current || !focused || read !== storeRead) return;
               const stored = filterMessagesByProtocol(rows, protocol);
               setMessages((prev) =>
                 keepPendingLocalRows(filterMessagesByProtocol(prev, protocol), stored),
@@ -230,6 +235,7 @@ export function useConversationLoader({
         }, 150);
       });
       return () => {
+        focused = false;
         clearTimeout(refreshTimer);
         clearTimeout(storeTimer);
         unsubscribe();

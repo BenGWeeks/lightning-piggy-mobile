@@ -27,7 +27,7 @@ export function buildNsecDecryptor(
   let secretKey: Uint8Array;
   try {
     const decoded = nostrService.decodeNsec(identity.nsec);
-    if (decoded.pubkey !== identity.pubkey) return null;
+    if (decoded.pubkey !== identity.pubkey.toLowerCase()) return null;
     secretKey = decoded.secretKey;
   } catch {
     return null;
@@ -96,7 +96,8 @@ export async function storeDecryptedWrap(
 export async function catchUpWrapById(owner: string, wrapId: string): Promise<void> {
   try {
     const { identities } = await loadIdentities();
-    const identity = identities.find((i) => i.pubkey === owner);
+    const me = owner.toLowerCase();
+    const identity = identities.find((i) => i.pubkey.toLowerCase() === me);
     const decrypt = identity ? buildNsecDecryptor(identity) : null;
     if (!decrypt) return;
     const relays = await resolveReadRelays(owner);

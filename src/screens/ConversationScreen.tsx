@@ -121,7 +121,7 @@ const ConversationScreen: React.FC = () => {
   const peerMediaTrusted = canAutoLoadMedia(false, pubkey, followed);
   // A notification or cold start can open this chat without the Messages tab:
   // arm the live sub and catch up on messages that arrived meanwhile (#1325).
-  useDmCatchUpOnOpen();
+  useDmCatchUpOnOpen(isLoggedIn);
   const { wallets, addNwcWallet } = useWallet();
   const { stopShare } = useLiveLocation();
 
