@@ -24,8 +24,13 @@ name: Marmot invite received — Middle Piggy starts an MLS DM, Big accepts it
       text: 'Invitation pending'
     direction: UP
     timeout: 120000
+# Middle's invitation only: an earlier run's invite may still be pending.
 - tapOn:
     id: 'marmot-invite-accept-.*'
+    childOf:
+      id: 'marmot-invite-row-.*'
+      containsDescendants:
+        - text: 'Middle Piggy'
 # Accepting a DM invite opens its Marmot thread.
 - extendedWaitUntil:
     visible:
