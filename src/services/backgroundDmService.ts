@@ -89,7 +89,7 @@ import {
   type DecodedRumor,
 } from '../utils/nip17Unwrap';
 import { dmRowPreview } from '../utils/dmRowPreview';
-import { hasRepliedTo } from './dmRepliedPartners';
+import { hasRepliedTo, loadRepliedPartners } from './dmRepliedPartners';
 import { loadBackgroundDmEnabled } from './backgroundDmPreference';
 import {
   startForegroundService,
@@ -482,6 +482,9 @@ async function armBackgroundDmWatchOnce(isCurrent: () => boolean): Promise<boole
   // path can't know the sender, so it can't be gated). Loaded once per arm;
   // the 15-min safety re-arm refreshes it as follows change.
   const followedPubkeys = decryptWrap ? await loadFollowedPubkeys(activePubkey) : null;
+  // A headless start has no React tree to load who we've replied to (#1623).
+  // Not awaited: it lands moments after arming, in time for fresh arrivals.
+  if (decryptWrap) void loadRepliedPartners(activePubkey);
   // Last await before subscribing: from here to `activeWatch` is synchronous,
   // so a stop / identity re-arm can't slip in between check and install.
   if (!isCurrent()) return false;

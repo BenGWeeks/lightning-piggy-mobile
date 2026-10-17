@@ -1,4 +1,8 @@
-import { hasRepliedTo, loadRepliedPartners } from '../services/dmRepliedPartners';
+import {
+  hasRepliedTo,
+  loadRepliedPartners,
+  repliedPartnersGeneration,
+} from '../services/dmRepliedPartners';
 import { reviveSellerAccount } from '../services/sellerEventStore';
 import { useLiveFollowGate } from './useLiveFollowGate';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -220,6 +224,8 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
    * any) and the account it ran for. Drives the cold-start + freshness-TTL
    * gates — see dmRefreshGate. A different account reads as `0`, so its first
    * refresh after a switch is a cold start and isn't TTL-skipped. */
+  // Per account: the replied-partners generation the last refresh saw (#1623).
+  const repliedGenerationRef = useRef(new Map<string, number>());
   const dmInboxLastRefresh = useRef<{
     pubkey: string | null;
     at: number;
@@ -415,7 +421,13 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
       const isColdStart = isColdStartRefresh(lastRefreshAt);
       // dmRefreshGate keeps the cold backfill's TTL bypass independent of
       // user-intent cache bypasses, avoiding decrypt sweeps on restart (#846).
-      const bypassSkipSet = shouldBypassSkipSet(opts);
+      // Replying to someone new re-checks the wraps the skip-set holds from
+      // when they didn't pass the gate, so their earlier messages appear (#1623).
+      const repliedGeneration = repliedPartnersGeneration(pubkey);
+      const repliedChanged =
+        (repliedGenerationRef.current.get(pubkey) ?? repliedGeneration) !== repliedGeneration;
+      repliedGenerationRef.current.set(pubkey, repliedGeneration);
+      const bypassSkipSet = shouldBypassSkipSet(opts) || repliedChanged;
       // Resolve setup before comparing effective cancellation and refresh strength.
       // A refresh in flight for a previous account is ignored here — its
       // writes are dropped by the owner scope, so there's nothing to wait for.

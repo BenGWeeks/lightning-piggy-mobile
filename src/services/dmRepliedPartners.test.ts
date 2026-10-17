@@ -15,6 +15,7 @@ import {
   forgetRepliedPartners,
   hasRepliedTo,
   loadRepliedPartners,
+  repliedPartnersGeneration,
 } from './dmRepliedPartners';
 
 const ME = 'a'.repeat(64);
@@ -64,4 +65,25 @@ it('forgets an account whose DM store was wiped', async () => {
   await loadRepliedPartners(ME);
   forgetRepliedPartners(ME);
   expect(hasRepliedTo(ME, ALICE)).toBe(false);
+});
+
+it("doesn't let a read that started before a wipe restore the account", async () => {
+  await upsertDmMessages([row({ conversation: ALICE })]);
+  const pending = loadRepliedPartners(ME);
+  forgetRepliedPartners(ME);
+  await pending;
+  expect(hasRepliedTo(ME, ALICE)).toBe(false);
+  // A fresh load after the wipe reads the store again.
+  await loadRepliedPartners(ME);
+  expect(hasRepliedTo(ME, ALICE)).toBe(true);
+});
+
+it('changes the generation only when we reply to someone new', async () => {
+  await loadRepliedPartners(ME);
+  const start = repliedPartnersGeneration(ME);
+  await upsertDmMessages([row({ conversation: ALICE })]);
+  expect(repliedPartnersGeneration(ME)).toBe(start + 1);
+  await upsertDmMessages([row({ conversation: ALICE })]); // same partner again
+  await upsertDmMessages([row({ conversation: BOB, fromMe: false, sender: BOB })]); // received
+  expect(repliedPartnersGeneration(ME)).toBe(start + 1);
 });
