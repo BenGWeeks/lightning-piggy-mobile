@@ -3395,6 +3395,8 @@
     "milliseconds": "%{count} ms",
     "operator": "Üzemeltető és szabályzatok",
     "runBy": "Üzemeltető",
+    "tipOperator": "Borravaló az üzemeltetőnek",
+    "tipOperatorLabel": "Küldj egy zapot {{name}} részére, aki ezt a relét üzemelteti",
     "copyUrl": "Relé URL másolása",
     "terms_of_service": "Felhasználási feltételek",
     "privacy_policy": "Adatvédelmi szabályzat",

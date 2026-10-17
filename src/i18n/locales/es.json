@@ -1626,6 +1626,7 @@
     "payInvoiceA11y": "Pagar la factura de este pedido",
     "pay": "Pagar",
     "invoiceExpired": "Esta factura ha caducado",
+    "amountUnverified": "No se puede verificar esta factura con el total del pedido original. Carga el pedido original antes de pagar; si los importes son distintos, pide al vendedor una factura corregida.",
     "hideQrA11y": "Ocultar código QR de la factura",
     "showQrA11y": "Mostrar código QR de la factura",
     "hideQr": "Ocultar QR",
@@ -1634,7 +1635,6 @@
     "copy": "Copiar",
     "qrCodeA11y": "Código QR de la factura Lightning",
     "scanHint": "Escanea con cualquier cartera Lightning",
-    "amountUnverified": "No se puede verificar esta factura con el total del pedido original. Carga el pedido original antes de pagar; si los importes son distintos, pide al vendedor una factura corregida.",
     "receiptUnverified": "No se puede verificar este recibo con tu pedido original. Carga el pedido original para confirmar que se pagó."
   },
   "paymentProgressOverlay": {
@@ -3395,6 +3395,8 @@
     "milliseconds": "%{count} ms",
     "operator": "Operador y políticas",
     "runBy": "Administrado por",
+    "tipOperator": "Dale una propina al operador",
+    "tipOperatorLabel": "Envía un zap a {{name}}, quien gestiona este relay",
     "copyUrl": "Copiar URL del relay",
     "terms_of_service": "Términos del servicio",
     "privacy_policy": "Política de privacidad",

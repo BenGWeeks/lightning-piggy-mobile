@@ -3395,6 +3395,8 @@
     "milliseconds": "%{count} ms",
     "operator": "运营者与政策",
     "runBy": "运营者",
+    "tipOperator": "给运营者打赏",
+    "tipOperatorLabel": "向此中继的运营者 {{name}} 发送闪电打赏",
     "copyUrl": "复制中继 URL",
     "terms_of_service": "服务条款",
     "privacy_policy": "隐私政策",

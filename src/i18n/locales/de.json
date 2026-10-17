@@ -3395,6 +3395,8 @@
     "milliseconds": "%{count} ms",
     "operator": "Betreiber und Richtlinien",
     "runBy": "Betrieben von",
+    "tipOperator": "Dem Betreiber Trinkgeld geben",
+    "tipOperatorLabel": "Sende einen Zap an {{name}}, der dieses Relay betreibt",
     "copyUrl": "Relay-URL kopieren",
     "terms_of_service": "Nutzungsbedingungen",
     "privacy_policy": "Datenschutzrichtlinie",
