@@ -161,3 +161,24 @@ it('asks again after the save fails', async () => {
   expect([...(await run()).keys()]).toEqual(['w-save']);
   expect(fetchWraps).toHaveBeenCalledTimes(2);
 });
+
+it('keeps rows retryable when it could not look anything up (no relays)', async () => {
+  await upsertDmMessages([row('w-old')]);
+  // No fetcher: the caller had no relays to ask.
+  await backfillThreadRumorIds({
+    owner: ME,
+    conversation: PEER,
+    wraps: [],
+    unwrap: (w) => rumorFor(w.id),
+  });
+  const fetchWraps = jest.fn(async (ids: string[]) => ids.map(wrap));
+  const filled = await backfillThreadRumorIds({
+    owner: ME,
+    conversation: PEER,
+    wraps: [],
+    fetchWraps,
+    unwrap: (w) => rumorFor(w.id),
+  });
+  expect(fetchWraps).toHaveBeenCalledWith(['w-old']);
+  expect(filled.get('w-old')).toBe(rumorEventId(rumorFor('w-old')));
+});

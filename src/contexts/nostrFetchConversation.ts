@@ -349,7 +349,11 @@ export async function fetchConversationFor(
             owner: pubkey,
             conversation: normalized,
             wraps: kind1059,
-            fetchWraps: (ids) => fetchWrapsByIds(ids, readRelays, signal),
+            // No relays yet (prefs still loading): no lookup, so the rows stay
+            // retryable on a later open instead of being marked as asked.
+            ...(readRelays.length > 0
+              ? { fetchWraps: (ids: string[]) => fetchWrapsByIds(ids, readRelays, signal) }
+              : {}),
             unwrap: (wrap) => unwrapWrapNsec(wrap, secretKey),
             signal,
           })
