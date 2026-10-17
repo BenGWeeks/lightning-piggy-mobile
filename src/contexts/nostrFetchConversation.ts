@@ -24,6 +24,7 @@ import {
 } from './nostrDmCache';
 import { mapStoredRowsToMessages } from './conversationReadThrough';
 import { ingestInboxWraps } from './dmWrapIngest';
+import { backfillThreadRumorIds } from './dmRumorIdBackfill';
 import { filterMessagesByProtocol } from '../utils/dmProtocol';
 import { ensureDmStoreMigrated } from './dmStoreMigrationRunner';
 import type { ConversationMessage } from './nostrContextTypes';
@@ -311,6 +312,27 @@ export async function fetchConversationFor(
       });
       nip17StoreHits += r.alreadyKnown;
       nip17FreshDecrypts += r.misses;
+      // Rows stored before received rows kept their rumor id (#1320) get it
+      // now, so old messages can be reacted to. Local keys only: a remote
+      // signer would need a prompt or round trip per old wrap.
+      if (signerType === 'nsec' && (!protocol || protocol === 'nip17')) {
+        try {
+          const filled = await backfillThreadRumorIds({
+            owner: pubkey,
+            conversation: normalized,
+            wraps: kind1059,
+            unwrap,
+            signal,
+          });
+          if (filled.size > 0) {
+            storedMessages = storedMessages.map((m) =>
+              !m.rumorId && filled.has(m.id) ? { ...m, rumorId: filled.get(m.id) } : m,
+            );
+          }
+        } catch (e) {
+          if (__DEV__) console.warn('[DmStore] rumor id backfill failed:', e);
+        }
+      }
       // Render-side filter to this thread's partner only — the rest were
       // stored for later opens of their own threads.
       for (const e of r.entries) {

@@ -500,6 +500,7 @@ describe('cached reactions on initial message render', () => {
         deleteReaction: jest.fn(),
       };
       const group = marmotReactionSource(MY_PK, PEER_PK, 'explicit-group');
+      const sendRumor = jest.fn(async () => ({ success: true }));
       const params = makeParams({
         scopeKey: `first-frame:${protocol}`,
         messages: [{ id: TARGET, rumorId: TARGET, text: 'cached', createdAt: 1, fromMe: true }],
@@ -510,6 +511,7 @@ describe('cached reactions on initial message render', () => {
           MY_PK,
           PEER_PK,
           relay,
+          sendRumor,
         );
         return useConversationReactions({
           ...params,
