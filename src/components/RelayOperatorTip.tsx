@@ -1,4 +1,5 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useIsFocused } from '@react-navigation/native';
 import { Text, TouchableOpacity } from 'react-native';
 import { Zap } from 'lucide-react-native';
 import { useNostr } from '../contexts/NostrContext';
@@ -32,6 +33,19 @@ export default function RelayOperatorTip({ pubkey, name, picture }: Props) {
   const { hasWallets } = useWallet();
   const [address, setAddress] = useState<string | null>(null);
   const [resolving, setResolving] = useState(false);
+  // The screen can stay mounted behind another one: a lookup that finishes
+  // after the user left mustn't open the sheet over whatever they're on.
+  const focused = useIsFocused();
+  const focusedRef = useRef(focused);
+  const attempt = useRef(0);
+  useEffect(() => {
+    focusedRef.current = focused;
+    if (!focused) {
+      attempt.current++;
+      setAddress(null);
+      setResolving(false);
+    }
+  }, [focused]);
 
   const tip = useCallback(async () => {
     if (!hasWallets) {
@@ -41,10 +55,12 @@ export default function RelayOperatorTip({ pubkey, name, picture }: Props) {
       );
       return;
     }
+    const mine = ++attempt.current;
     setResolving(true);
     try {
       const read = relays.filter((r) => r.read).map((r) => r.url);
       const profile = await fetchProfile(pubkey, read);
+      if (mine !== attempt.current || !focusedRef.current) return;
       if (!profile?.lud16) {
         Alert.alert(
           t('contactProfileScreen.noLightningAddressTitle'),
@@ -54,7 +70,7 @@ export default function RelayOperatorTip({ pubkey, name, picture }: Props) {
       }
       setAddress(profile.lud16);
     } finally {
-      setResolving(false);
+      if (mine === attempt.current) setResolving(false);
     }
   }, [hasWallets, relays, pubkey, name, t]);
 

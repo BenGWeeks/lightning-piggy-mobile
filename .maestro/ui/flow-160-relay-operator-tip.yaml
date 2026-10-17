@@ -2,8 +2,9 @@ appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Relay details offers a tip to the operator
 ---
 # Signed-in test Piggy whose NIP-17 inbox relays include relay.primal.net (its NIP-11
-# names an operator with a Lightning address). Read-only: the tip button is
-# checked, never tapped, so no payment can start.
+# names an operator, pedja, with a Lightning address). Opens the zap sheet and
+# checks it's addressed to the operator, then cancels: no amount is entered and
+# Send is never tapped, so no payment can start.
 - launchApp:
     stopApp: false
 - repeat:
@@ -47,3 +48,16 @@ name: Relay details offers a tip to the operator
     timeout: 30000
 - assertVisible:
     id: 'relay-operator-tip'
+- tapOn:
+    id: 'relay-operator-tip'
+- extendedWaitUntil:
+    visible:
+      id: 'send-recipient'
+    timeout: 30000
+- assertVisible:
+    id: 'send-recipient'
+    text: 'pedja@primal.net'
+- tapOn:
+    text: 'Cancel'
+- assertNotVisible:
+    id: 'send-recipient'
