@@ -18,6 +18,7 @@ import {
   loadRepliedPartners,
   pendingSkipSetRecheck,
   beginSkipSetRecheck,
+  skipSetRecheckDone,
 } from './dmRepliedPartners';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -132,4 +133,12 @@ it('gives a recheck one forced pass per session, even if that pass is cut short'
   __resetRepliedPartnersForTests();
   await loadRepliedPartners(ME);
   expect(beginSkipSetRecheck(ME)).not.toBeNull();
+});
+
+it('counts a recheck done when there was nothing to re-read, not when cut short', () => {
+  // No wraps fetched / no NIP-17 path for this signer: nothing to re-read.
+  expect(skipSetRecheckDone(false, false)).toBe(true);
+  expect(skipSetRecheckDone(true, false)).toBe(true);
+  // The ingest ran but was aborted: keep the recheck pending.
+  expect(skipSetRecheckDone(true, true)).toBe(false);
 });

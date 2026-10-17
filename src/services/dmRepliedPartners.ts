@@ -108,6 +108,12 @@ export function completeSkipSetRecheck(owner: string, recheck: number): void {
   AsyncStorage.removeItem(perAccountKey(RECHECK_KEY, owner)).catch(() => undefined);
 }
 
+/** Did a refresh's wrap ingest finish the recheck? Yes if it ran to the end,
+ * or if there was nothing to re-read (no wraps / no NIP-17 path for the signer). */
+export function skipSetRecheckDone(ingestRan: boolean, ingestAborted: boolean): boolean {
+  return !ingestRan || !ingestAborted;
+}
+
 /** Forget an account's replies (its DM store was wiped). */
 export function forgetRepliedPartners(owner: string): void {
   repliedByOwner.delete(owner);

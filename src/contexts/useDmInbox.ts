@@ -4,6 +4,7 @@ import {
   hasRepliedTo,
   loadRepliedPartners,
   pendingSkipSetRecheck,
+  skipSetRecheckDone,
 } from '../services/dmRepliedPartners';
 import { reviveSellerAccount } from '../services/sellerEventStore';
 import { useLiveFollowGate } from './useLiveFollowGate';
@@ -514,7 +515,6 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
           // Replying to someone new re-reads wraps the skip-set rejected before:
           // one forced pass per session, cleared once a refresh completes it.
           const skipSetRecheck = beginSkipSetRecheck(refreshForPubkey);
-          let skipSetRechecked = false;
 
           // Cold REBUILD detection (F1, #849). A post-login / post-wipe inbox
           // has an empty store: this sweep is the ONLY thing that will populate
@@ -709,8 +709,8 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
                   amberNip44DecryptSilent,
                 })
               : null;
+          const skipSetRechecked = skipSetRecheckDone(nip17 !== null, effectiveSignal.aborted);
           if (nip17) {
-            skipSetRechecked = !effectiveSignal.aborted;
             // No early return on abort: entries is [] when aborted, but
             // nip17Stored counts rows persisted before the abort (F1, #849)
             // and drives the productive-abort commit below.
