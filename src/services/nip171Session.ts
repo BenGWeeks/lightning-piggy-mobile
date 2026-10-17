@@ -214,8 +214,9 @@ export function startNip171Session(owner: string, readRelays: string[]): () => v
       {
         onevent: (event: RawGiftWrapEvent) => {
           if (seen.has(event.id)) return;
+          // Flood: drop it unseen, so a later subscription can deliver it again.
+          if (queue.length >= QUEUE_CAP) return;
           remember(event.id);
-          if (queue.length >= QUEUE_CAP) return; // flood: drop, a later sub replays it
           queue.push(event);
           void drain();
         },
