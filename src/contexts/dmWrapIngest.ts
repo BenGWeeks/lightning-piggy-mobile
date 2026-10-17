@@ -1,4 +1,5 @@
 import { isChatReactionKind } from '../utils/nip17Reactions';
+import { placeOwnChatReaction } from './chatReactionPartner';
 import { admitOrderLifecycle, admitUnfollowedOrder, isBoundedOrderRumor } from './orderRumorIngest';
 import { getAppFormatLocale } from '../utils/appFormatLocale';
 import type { DmInboxEntry } from '../utils/conversationSummaries';
@@ -210,7 +211,11 @@ async function ingestInboxWrapsRun<W extends IngestableWrap>(
           }
           return null;
         }
-        const partnership = partnerFromRumor(rumor, owner);
+        const partnership = await placeOwnChatReaction(
+          rumor,
+          owner,
+          partnerFromRumor(rumor, owner),
+        );
         if (!partnership) return null;
         // B1 — free-text non-follows stay gated. Valid bounded orders
         // persist independently for Orders, but Messages keeps the gate. A

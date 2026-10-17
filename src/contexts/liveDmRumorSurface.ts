@@ -1,6 +1,7 @@
 import { admitOrderLifecycle, admitUnfollowedOrder, isBoundedOrderRumor } from './orderRumorIngest';
 import { gateLiveDm } from './liveDmFollowGateDecision';
 import { isChatReactionKind } from '../utils/nip17Reactions';
+import { placeOwnChatReaction } from './chatReactionPartner';
 import { getAppFormatLocale } from '../utils/appFormatLocale';
 import { dmThreadId, MARMOT_WELCOME_KIND, protocolForWireKind } from '../utils/dmProtocol';
 import type React from 'react';
@@ -187,7 +188,12 @@ export function createLiveRumorSurfacer(
       return;
     }
 
-    const partnership = partnerFromRumor(rumor, viewerPubkey);
+    const partnership = await placeOwnChatReaction(
+      rumor,
+      viewerPubkey,
+      partnerFromRumor(rumor, viewerPubkey),
+    );
+    if (shouldAbort()) return;
     if (!partnership) {
       nothingToSee();
       if (__DEV__) console.log(`[Nostr] live wrap ${wrapId.slice(0, 8)} no-partnership`);

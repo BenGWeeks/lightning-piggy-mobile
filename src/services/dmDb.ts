@@ -51,8 +51,10 @@ export interface DmMessageRow {
 }
 
 /** Post-commit updates: consumers must not resolve wraps before their rows exist. */
-const dmStorageListeners = new Set<(owner: string) => void>();
-export function subscribeDmStorage(listener: (owner: string) => void): () => void {
+type DmStorageListener = (owner: string, rows: readonly DmMessageRow[]) => void;
+const dmStorageListeners = new Set<DmStorageListener>();
+/** `rows` are the committed rows for `owner` (empty when not row-specific). */
+export function subscribeDmStorage(listener: DmStorageListener): () => void {
   dmStorageListeners.add(listener);
   return () => {
     dmStorageListeners.delete(listener);
@@ -61,9 +63,10 @@ export function subscribeDmStorage(listener: (owner: string) => void): () => voi
 
 function notifyDmStorage(rows: readonly DmMessageRow[]): void {
   for (const owner of new Set(rows.map((row) => row.owner))) {
+    const ownerRows = rows.filter((row) => row.owner === owner);
     for (const listener of dmStorageListeners) {
       try {
-        listener(owner);
+        listener(owner, ownerRows);
       } catch {
         // A consumer failure must not turn a committed write into a failed one.
       }
@@ -700,6 +703,28 @@ export async function selectRowsMissingRumorId(
     [owner, conversation, limit],
   );
   return (res.rows ?? []).map((r) => String(r.event_id));
+}
+
+/**
+ * The 1:1 NIP-17 conversation holding a message or reaction with one of these
+ * rumor ids, or null. Places a reaction / retraction our other client sent
+ * without the peer's `p` tag (#1321).
+ */
+export async function getConversationForRumorIds(
+  owner: string,
+  rumorIds: readonly string[],
+): Promise<string | null> {
+  if (rumorIds.length === 0) return null;
+  const db = await getLocalDb();
+  const ids = rumorIds.slice(0, VAR_CHUNK);
+  const res = await db.execute(
+    `SELECT conversation FROM dm_messages
+      WHERE owner = ? AND conversation != ? AND ${PROTOCOL_SQL} = 'nip17'
+        AND rumor_id IN (${ids.map(() => '?').join(',')}) LIMIT 1;`,
+    [owner, owner, ...ids],
+  );
+  const row = (res.rows ?? [])[0];
+  return row ? String(row.conversation) : null;
 }
 
 /** Remove one optimistic `local-` row (a send no relay accepted). Never

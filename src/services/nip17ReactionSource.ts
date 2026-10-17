@@ -3,10 +3,11 @@
 // arrive through the normal DM ingest, which stores them as wireKind 7 / 5
 // rows; this source reads those rows back and sends new ones.
 //
-// Public NIP-25 reactions to DM messages (what earlier Lightning Piggy builds
-// sent) are still read, so existing reactions don't disappear. They arrive on
-// the live channel after the stored ones, so slow relays never delay those.
-// Retracting one also sends a public kind 5, asking relays to delete it.
+// Earlier Lightning Piggy builds published DM reactions publicly. Our own are
+// still read (by author, so no private message id goes to a relay) and show
+// after the stored ones; retracting one also sends a public kind 5, asking
+// relays to delete it. The peer's old public reactions are not read: finding
+// them would mean asking relays about this chat's message ids.
 //
 // Same shape as the Marmot source, so useConversationReactions can use either.
 
@@ -16,6 +17,7 @@ import {
   LOCAL_DM_ID_PREFIX,
   subscribeDmStorage,
   upsertDmMessages,
+  type DmMessageRow,
 } from './dmDb';
 import { directMessageRumorEventId } from './dmRumorId';
 import {
@@ -24,6 +26,7 @@ import {
   CHAT_DELETION_KIND,
   CHAT_REACTION_KIND,
   eTagTargets,
+  isChatReactionKind,
   serializeChatReactionRumor,
   storedChatReactionEvent,
   type ChatReactionEvent,
@@ -42,9 +45,10 @@ export interface Nip17ReactionDeps {
   peerPubkey: string;
   /** Gift-wrap `rumor` to the peer (and our own inbox). True once a relay accepted it. */
   sendRumor: (rumor: ChatRumor) => Promise<boolean>;
-  /** Public NIP-25 / NIP-09 reads and the public retraction, for older reactions. */
+  /** Our own public DM reactions from earlier builds, their public retractions,
+   * and the public retraction we send when removing one. */
   publicReactions: {
-    fetchReactionsForMessages: (ids: string[]) => Promise<ChatReactionEvent[]>;
+    fetchOwnDmReactions: () => Promise<ChatReactionEvent[]>;
     fetchReactionDeletions: (
       ids: string[],
     ) => Promise<{ id: string; pubkey: string; created_at: number; tags: string[][] }[]>;
@@ -62,9 +66,12 @@ export interface Nip17ReactionSource {
     targetEventKind?: number;
   }) => Promise<string | null>;
   deleteReaction: (reactionEventId: string) => Promise<boolean>;
-  /** Wrapped reactions / retractions stored after subscribing. Returns unsubscribe. */
+  /** Wrapped reactions / retractions stored after subscribing, then our older
+   * public ones as the relays answer. Returns unsubscribe. */
   subscribe: (onEvent: (event: ChatReactionEvent) => void) => () => void;
 }
+
+const isLocalRow = (row: DmMessageRow) => row.eventId.startsWith(LOCAL_DM_ID_PREFIX);
 
 /** The reaction backend for `myPubkey`'s NIP-17 chat with `peerPubkey`. */
 export function nip17ReactionSource(deps: Nip17ReactionDeps): Nip17ReactionSource {
@@ -76,33 +83,34 @@ export function nip17ReactionSource(deps: Nip17ReactionDeps): Nip17ReactionSourc
     const p = pubkey.toLowerCase();
     return p === me || p === peer;
   };
-  // Reaction ids that came from public relays: retracting one also needs a
-  // public kind 5, or the leaked event stays up.
+  // Our reaction ids that came from public relays: retracting one also needs
+  // a public kind 5, or the leaked event stays up.
   const publicIds = new Set<string>();
-  // The open thread's live listeners. Public reactions arrive through them,
-  // so a slow or dead relay never holds back the stored ones.
+  // The open thread's live listeners. Older public reactions arrive through
+  // them, so a slow or dead relay never holds back the stored ones.
   const listeners = new Set<(event: ChatReactionEvent) => void>();
   const emit = (event: ChatReactionEvent) => {
     for (const listener of listeners) listener(event);
   };
 
-  const readStored = async (): Promise<ChatReactionEvent[]> =>
-    (await getConversationReactionRows(me, peer))
+  const toEvents = (rows: DmMessageRow[]) =>
+    rows
       .map(storedChatReactionEvent)
       .filter((e): e is ChatReactionEvent => !!e && isMember(e.pubkey));
-  // Reads merge into what the thread already shows, so a store failure can
-  // degrade to the public results instead of rejecting them too.
+  // Reads merge into what the thread already shows, so a store failure
+  // degrades to nothing new rather than rejecting.
   const storedEvents = async (kind: number): Promise<ChatReactionEvent[]> =>
-    (await readStored().catch(() => [])).filter((e) => e.kind === kind);
+    toEvents(await getConversationReactionRows(me, peer).catch(() => [])).filter(
+      (e) => e.kind === kind,
+    );
 
-  // A failed or timed-out relay read must not hide the stored reactions.
-  const publicRead = async <T extends { pubkey: string }>(read: () => Promise<T[]>) => {
-    try {
-      return (await read()).filter((e) => isMember(e.pubkey));
-    } catch {
-      return [];
-    }
-  };
+  // Our own public reactions, read once per thread open. Never rejects.
+  let ownPublic: Promise<ChatReactionEvent[]> | null = null;
+  const ownPublicReactions = () =>
+    (ownPublic ??= deps.publicReactions
+      .fetchOwnDmReactions()
+      .then((events) => events.filter((e) => e.pubkey.toLowerCase() === me))
+      .catch(() => []));
 
   // Store our own reaction / retraction before sending it, so it survives a
   // restart even if the relay echo of our self-copy never arrives. The echo
@@ -145,19 +153,18 @@ export function nip17ReactionSource(deps: Nip17ReactionDeps): Nip17ReactionSourc
         const ids = eTagTargets(e);
         return ids.length > 0 && wanted.has(ids[ids.length - 1]);
       };
-      // Older public reactions (and their retractions) follow on the live
-      // channel once the relays answer.
-      void publicRead(() => deps.publicReactions.fetchReactionsForMessages(ids)).then(
-        async (reactions) => {
-          if (reactions.length === 0) return;
-          for (const e of reactions) publicIds.add(e.id.toLowerCase());
-          const retractions = await publicRead(() =>
-            deps.publicReactions.fetchReactionDeletions(reactions.map((e) => e.id)),
-          );
-          for (const e of reactions) emit(e);
-          for (const e of retractions) emit({ ...e, kind: CHAT_DELETION_KIND, content: '' });
-        },
-      );
+      void ownPublicReactions().then(async (all) => {
+        const reactions = all.filter(targets);
+        if (reactions.length === 0) return;
+        for (const e of reactions) publicIds.add(e.id.toLowerCase());
+        const retractions = await deps.publicReactions
+          .fetchReactionDeletions(reactions.map((e) => e.id))
+          .catch(() => []);
+        for (const e of reactions) emit(e);
+        for (const e of retractions) {
+          if (e.pubkey.toLowerCase() === me) emit({ ...e, kind: CHAT_DELETION_KIND, content: '' });
+        }
+      });
       return (await storedEvents(CHAT_REACTION_KIND)).filter(targets);
     },
     fetchReactionDeletions: async (ids) => {
@@ -175,25 +182,37 @@ export function nip17ReactionSource(deps: Nip17ReactionDeps): Nip17ReactionSourc
         buildChatReactionDeletionRumor({ myPubkey: me, peerPubkey: peer, reactionEventId: id }),
       ).catch(() => null);
       if (!publicIds.has(id)) return wrapped !== null;
-      // An older public reaction: ask relays to delete it too.
+      // An older public reaction: it only counts as removed once relays have
+      // been asked to delete it too, so a failure can be retried.
       const removed = await deps.publicReactions.deleteReaction(id).catch(() => false);
-      return removed || wrapped !== null;
+      return removed && wrapped !== null;
     },
     subscribe: (onEvent) => {
       let active = true;
       const emitted = new Set<string>();
-      const read = readStored;
+      // Relay-delivered rows only: an optimistic `local-` row may still be
+      // rolled back if its send fails, and the hook already shows it.
+      const read = async () =>
+        toEvents((await getConversationReactionRows(me, peer)).filter((r) => !isLocalRow(r)));
       // Rows already stored are the fetch's job; only later commits are live.
       let chain = read()
         .then((events) => {
           for (const e of events) emitted.add(e.id);
         })
         .catch(() => undefined);
+      // One pending rescan at most: a burst of commits shares it.
+      let rescanQueued = false;
       listeners.add(onEvent);
-      const unsubscribe = subscribeDmStorage((owner) => {
-        if (owner !== me) return;
+      const unsubscribe = subscribeDmStorage((owner, rows) => {
+        if (owner !== me || rescanQueued) return;
+        const relevant = rows.some(
+          (r) => r.conversation === peer && isChatReactionKind(r.wireKind) && !isLocalRow(r),
+        );
+        if (!relevant) return;
+        rescanQueued = true;
         chain = chain
           .then(async () => {
+            rescanQueued = false;
             if (!active) return;
             for (const e of await read()) {
               if (emitted.has(e.id)) continue;

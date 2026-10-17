@@ -68,7 +68,7 @@ const reaction = (pubkey: string, emoji: string, at = 200): ChatRumor => ({
 function makeDeps() {
   const sendRumor = jest.fn(async (_rumor: ChatRumor) => true);
   const publicReactions = {
-    fetchReactionsForMessages: jest.fn(async (_ids: string[]) => [] as never[]),
+    fetchOwnDmReactions: jest.fn(async () => [] as never[]),
     fetchReactionDeletions: jest.fn(async (_ids: string[]) => [] as never[]),
     deleteReaction: jest.fn(async (_id: string) => true),
   };
@@ -122,29 +122,36 @@ describe('reading wrapped reactions', () => {
     expect((await getInboxLatest(ME)).map((r) => r.eventId)).toEqual(['wrap-msg']);
   });
 
-  it('returns stored reactions at once and streams public ones from older builds', async () => {
+  it('returns stored reactions at once and streams our older public ones', async () => {
     const legacy = {
       id: '9'.repeat(64),
-      pubkey: PEER,
+      pubkey: ME,
       kind: 7,
       content: '👍',
       created_at: 150,
-      tags: [['e', MSG]],
+      tags: [
+        ['e', MSG],
+        ['k', '14'],
+      ],
     };
-    const stranger = { ...legacy, id: '8'.repeat(64), pubkey: STRANGER };
+    const elsewhere = { ...legacy, id: '8'.repeat(64), tags: [['e', '2'.repeat(64)]] };
     const retraction = {
       id: '7'.repeat(64),
-      pubkey: PEER,
+      pubkey: ME,
       created_at: 160,
       tags: [['e', legacy.id]],
     };
+    const forged = { ...retraction, id: '6'.repeat(64), pubkey: STRANGER };
     await upsertDmMessages([storedRumorRow(reaction(PEER, '🎉'), 'wrap-r1')]);
     const deps = makeDeps();
     let answerRelays!: (events: never[]) => void;
-    deps.publicReactions.fetchReactionsForMessages.mockReturnValueOnce(
+    deps.publicReactions.fetchOwnDmReactions.mockReturnValueOnce(
       new Promise((resolve) => (answerRelays = resolve)),
     );
-    deps.publicReactions.fetchReactionDeletions.mockResolvedValueOnce([retraction] as never[]);
+    deps.publicReactions.fetchReactionDeletions.mockResolvedValueOnce([
+      retraction,
+      forged,
+    ] as never[]);
     const source = nip17ReactionSource(deps);
     const live: { kind: number; id: string }[] = [];
     const unsubscribe = source.subscribe((e) => live.push({ kind: e.kind, id: e.id }));
@@ -152,12 +159,13 @@ describe('reading wrapped reactions', () => {
     // The relays haven't answered, yet the stored reaction is already back.
     expect((await source.fetchReactionsForMessages([MSG])).map((e) => e.content)).toEqual(['🎉']);
 
-    answerRelays([legacy, stranger] as never[]);
+    answerRelays([legacy, elsewhere] as never[]);
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(live).toEqual([
       { kind: 7, id: legacy.id },
       { kind: 5, id: retraction.id },
     ]);
+    // Only public event ids are ever sent to a relay, never a private rumor id.
     expect(deps.publicReactions.fetchReactionDeletions).toHaveBeenCalledWith([legacy.id]);
     unsubscribe();
   });
@@ -165,7 +173,7 @@ describe('reading wrapped reactions', () => {
   it('keeps stored reactions when the relay read fails', async () => {
     await upsertDmMessages([storedRumorRow(reaction(PEER, '🎉'), 'wrap-r1')]);
     const deps = makeDeps();
-    deps.publicReactions.fetchReactionsForMessages.mockRejectedValueOnce(new Error('timeout'));
+    deps.publicReactions.fetchOwnDmReactions.mockRejectedValueOnce(new Error('timeout'));
     const source = nip17ReactionSource(deps);
     expect((await source.fetchReactionsForMessages([MSG])).map((e) => e.content)).toEqual(['🎉']);
   });
@@ -240,7 +248,7 @@ describe('sending', () => {
   it('retracts with a wrapped kind 5, and also publicly for an older public reaction', async () => {
     const legacyId = '9'.repeat(64);
     const deps = makeDeps();
-    deps.publicReactions.fetchReactionsForMessages.mockResolvedValueOnce([
+    deps.publicReactions.fetchOwnDmReactions.mockResolvedValue([
       { id: legacyId, pubkey: ME, kind: 7, content: '👍', created_at: 1, tags: [['e', MSG]] },
     ] as never[]);
     const source = nip17ReactionSource(deps);
@@ -261,6 +269,10 @@ describe('sending', () => {
     await new Promise((resolve) => setTimeout(resolve, 10)); // public read settles
     expect(await source.deleteReaction(legacyId)).toBe(true);
     expect(deps.publicReactions.deleteReaction).toHaveBeenCalledWith(legacyId);
+
+    // A failed public delete is a failure: the leaked event is still up.
+    deps.publicReactions.deleteReaction.mockResolvedValueOnce(false);
+    expect(await source.deleteReaction(legacyId)).toBe(false);
   });
 });
 
@@ -280,5 +292,51 @@ describe('live', () => {
     await upsertDmMessages([storedRumorRow(reaction(PEER, '😮', 400), 'wrap-late')]);
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(seen).toEqual(['🔥']);
+  });
+
+  it('never emits our own pending reaction, so a failed send leaves nothing behind', async () => {
+    const deps = makeDeps();
+    let finishSend!: (ok: boolean) => void;
+    deps.sendRumor.mockReturnValueOnce(new Promise((resolve) => (finishSend = resolve)));
+    const source = nip17ReactionSource(deps);
+    const seen: string[] = [];
+    const unsubscribe = source.subscribe((e) => seen.push(e.content));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    const pending = source.publishReaction({
+      emoji: '❤️',
+      targetEventId: MSG,
+      targetAuthorPubkey: ME,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20)); // local row committed
+    finishSend(false);
+    expect(await pending).toBeNull();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(seen).toEqual([]);
+    unsubscribe();
+  });
+
+  it('ignores commits that hold no reaction for this chat', async () => {
+    const source = nip17ReactionSource(makeDeps());
+    const seen: string[] = [];
+    const unsubscribe = source.subscribe((e) => seen.push(e.content));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const db = await getLocalDb();
+    const spy = jest.spyOn(db, 'execute');
+    await upsertDmMessages([{ ...message, eventId: 'wrap-msg-2', content: 'another message' }]);
+    await upsertDmMessages(
+      [storedRumorRow({ ...reaction(PEER, '🔥'), pubkey: PEER }, 'wrap-other')].map((r) => ({
+        ...r,
+        conversation: STRANGER,
+      })),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const reactionReads = spy.mock.calls.filter(([sql]) =>
+      String(sql).includes('wire_kind IN (7, 5)'),
+    );
+    expect(reactionReads).toHaveLength(0);
+    expect(seen).toEqual([]);
+    spy.mockRestore();
+    unsubscribe();
   });
 });
