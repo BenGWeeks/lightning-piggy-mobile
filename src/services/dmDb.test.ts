@@ -18,13 +18,11 @@ import {
   hasStoredWraps,
   hasConversationWith,
   deleteDmMessagesForOwner,
-  dmOwnerEpoch,
-  isDmOwnerRetired,
-  reviveDmOwner,
   deleteMarmotMessages,
   type DmMessageRow,
   getConversationForEvent,
 } from './dmDb';
+import { dmOwnerEpoch, isDmOwnerRetired, reviveDmOwner } from './dmOwnerGuard';
 
 const mockExecute = jest.fn();
 const mockTransaction = jest.fn(

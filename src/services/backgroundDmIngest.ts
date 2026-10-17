@@ -82,7 +82,8 @@ export async function storeDecryptedWrap(
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     require('../contexts/dmWrapIngest') as typeof import('../contexts/dmWrapIngest');
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { dmOwnerEpoch, isDmOwnerRetired } = require('./dmDb') as typeof import('./dmDb');
+  const { dmOwnerEpoch, isDmOwnerRetired } =
+    require('./dmOwnerGuard') as typeof import('./dmOwnerGuard');
   // A sign-out while this decrypts wipes the owner's rows: the save must not
   // put this one back, so it checks the wipe counter right before writing.
   const epoch = dmOwnerEpoch(owner);

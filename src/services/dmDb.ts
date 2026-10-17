@@ -1,6 +1,7 @@
 import { type ParsedOrderEvent, parseStoredOrder } from '../utils/orderEvents';
 import type { DeliveryStatus } from '../utils/dmDeliveryStatus';
 import { getLocalDb } from './localDb';
+import { retireDmOwner } from './dmOwnerGuard';
 import type { MarmotEdit } from './marmotEdits';
 import { MARMOT_WELCOME_KIND, protocolForWireKind, type DmProtocol } from '../utils/dmProtocol';
 
@@ -828,32 +829,8 @@ export async function deleteMarmotMessages(
  * wipe (#848). When the LAST identity signs out, NostrContext additionally
  * calls `wipeLocalDmStore` (localDb) to delete the DB file + keystore key.
  */
-// Bumped (synchronously) whenever an owner's rows are wiped, so a write that
-// started before the wipe can tell it would put rows back (see dmOwnerEpoch).
-const ownerWipeEpochs = new Map<string, number>();
-// Accounts wiped in this process (signed out): a background write that starts
-// after the wipe, before the identity is gone, must not recreate their rows.
-// Cleared when the account becomes active again (as group history does).
-const retiredOwners = new Set<string>();
-
-/** Changes when `owner`'s DM rows are wiped (sign-out / account removal). */
-export function dmOwnerEpoch(owner: string): number {
-  return ownerWipeEpochs.get(owner.toLowerCase()) ?? 0;
-}
-
-/** Whether `owner` was signed out in this process and not signed in since. */
-export function isDmOwnerRetired(owner: string): boolean {
-  return retiredOwners.has(owner.toLowerCase());
-}
-
-/** Lift the sign-out write guard — call when `owner` becomes the active account. */
-export function reviveDmOwner(owner: string): void {
-  retiredOwners.delete(owner.toLowerCase());
-}
-
 export async function deleteDmMessagesForOwner(owner: string): Promise<void> {
-  ownerWipeEpochs.set(owner.toLowerCase(), dmOwnerEpoch(owner) + 1);
-  retiredOwners.add(owner.toLowerCase());
+  retireDmOwner(owner); // before the DELETE: in-flight writes must see it
   const db = await getLocalDb();
   // A transaction, so it's ordered against upserts (see upsertDmMessages).
   await db.transaction(async (tx) => {

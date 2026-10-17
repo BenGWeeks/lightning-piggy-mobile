@@ -8,7 +8,10 @@ jest.mock('../contexts/dmWrapIngest', () => ({
 }));
 let mockEpoch = 0;
 let mockRetired = false;
-jest.mock('./dmDb', () => ({ dmOwnerEpoch: () => mockEpoch, isDmOwnerRetired: () => mockRetired }));
+jest.mock('./dmOwnerGuard', () => ({
+  dmOwnerEpoch: () => mockEpoch,
+  isDmOwnerRetired: () => mockRetired,
+}));
 const mockIdentities = jest.fn();
 jest.mock('./identitiesStore', () => ({ loadIdentities: () => mockIdentities() }));
 jest.mock('./backgroundDmReadRelays', () => ({
