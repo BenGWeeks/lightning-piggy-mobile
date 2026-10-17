@@ -342,6 +342,8 @@ async function handleWrap(input: {
     // …unless we've replied to them (#1623), like the live sub. Wait for that
     // set to load so a cold start can't mistake them for a stranger.
     await loadRepliedPartners(viewerPubkey);
+    // Signed out / switched account meanwhile: not this watch's to alert.
+    if (activeWatch?.viewerPubkey !== viewerPubkey) return;
     if (!hasRepliedTo(viewerPubkey, partnership.partnerPubkey)) return;
   }
   // Claim BEFORE the async name resolution below — the claim is the
