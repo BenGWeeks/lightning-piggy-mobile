@@ -38,7 +38,9 @@ const TapToLoadMedia: React.FC<Props> = ({ variant, url, fromMe, testID, onPress
   const { t } = useLocale();
   const styles = useMemo(() => createTapToLoadMediaStyles(colors, fromMe), [colors, fromMe]);
   const host = displayHost(url);
+  // White only on the preview card, which sits on our pink bubble.
   const iconColor = fromMe ? colors.white : colors.brandPink;
+  const onLightBox = variant !== 'preview';
 
   if (!checkRemoteUrl(url, { kind: variant === 'preview' ? 'preview' : 'media' }).ok) {
     return (
@@ -53,7 +55,9 @@ const TapToLoadMedia: React.FC<Props> = ({ variant, url, fromMe, testID, onPress
         ]}
         testID={testID}
       >
-        <Text style={styles.label}>{t('messageBubble.blockedLink')}</Text>
+        <Text style={onLightBox ? styles.boxLabel : styles.label}>
+          {t('messageBubble.blockedLink')}
+        </Text>
       </View>
     );
   }
@@ -72,11 +76,11 @@ const TapToLoadMedia: React.FC<Props> = ({ variant, url, fromMe, testID, onPress
   if (variant === 'image') {
     return (
       <View style={[styles.imageBox, style]} testID={testID}>
-        <ImageIcon size={28} color={iconColor} />
-        <Text style={[styles.label, styles.labelCentered]}>
+        <ImageIcon size={28} color={colors.brandPink} />
+        <Text style={[styles.boxLabel, styles.labelCentered]}>
           {t('messageBubble.tapToLoadImage')}
         </Text>
-        <Text style={[styles.host, styles.labelCentered]} numberOfLines={1}>
+        <Text style={[styles.boxHost, styles.labelCentered]} numberOfLines={1}>
           {t('messageBubble.loadsFrom', { host })}
         </Text>
       </View>

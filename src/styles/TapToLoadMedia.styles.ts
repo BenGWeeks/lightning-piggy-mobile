@@ -2,8 +2,10 @@ import { StyleSheet } from 'react-native';
 import type { Palette } from './palettes';
 
 // Presentation for the tap-to-load placeholder shown in place of chat media
-// from senders the reader doesn't follow (#1338). `fromMe` mirrors the
-// link-preview card's on-pink treatment, though own messages never gate.
+// from senders the reader doesn't follow (#1338). Only the link-preview card
+// sits on our pink bubble, so only it uses `fromMe`'s white text; the image
+// box and thumbnail tile are light boxes, read the same in any bubble (our own
+// media shows one too when its link is blocked).
 export const createTapToLoadMediaStyles = (colors: Palette, fromMe: boolean) =>
   StyleSheet.create({
     // Link-preview variant: a card the same shape as MessageLinkPreview.
@@ -54,6 +56,16 @@ export const createTapToLoadMediaStyles = (colors: Palette, fromMe: boolean) =>
       fontSize: 14,
       fontWeight: '700',
       color: fromMe ? colors.white : colors.textHeader,
+    },
+    // The image box / thumbnail tile: light, whoever sent the message.
+    boxLabel: {
+      fontSize: 14,
+      fontWeight: '700',
+      color: colors.textHeader,
+    },
+    boxHost: {
+      fontSize: 12,
+      color: colors.textSupplementary,
     },
     labelCentered: {
       textAlign: 'center',
