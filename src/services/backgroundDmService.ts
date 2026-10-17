@@ -288,10 +288,6 @@ async function handleWrap(input: {
     console.warn('[BgDmWatch] wrap skipped: decrypt failed');
     return;
   }
-  // Keep what we just decrypted (#1325): tapping the alert or opening
-  // Messages then shows it at once instead of waiting for an inbox refresh.
-  // Not awaited: the write takes milliseconds and mustn't delay the alert.
-  void storeDecryptedWrap(viewerPubkey, ev, rumor, input.followedPubkeys).catch(() => undefined);
   // Only notify for genuinely-fresh arrivals (the inner rumor timestamp is
   // the real send time; the relay's on-open backlog has old timestamps).
   if (rumor.created_at < subOpenedAtSec - NOTIFY_SKEW_SEC) return;
@@ -310,6 +306,14 @@ async function handleWrap(input: {
     !input.followedPubkeys.has(partnership.partnerPubkey.toLowerCase())
   ) {
     return;
+  }
+  // Keep what we just decrypted (#1325): tapping the alert or opening
+  // Messages then shows it at once instead of waiting for an inbox refresh.
+  // Fresh, gated 1:1 messages only: the on-open backlog, Marmot invites and
+  // an unknown follow set are left to the refresh. Not awaited: the write
+  // mustn't delay the alert.
+  if (input.followedPubkeys) {
+    void storeDecryptedWrap(viewerPubkey, ev, rumor, input.followedPubkeys).catch(() => undefined);
   }
   // Claim BEFORE the async name resolution below — the claim is the
   // synchronous point that closes the race with the foreground live sub

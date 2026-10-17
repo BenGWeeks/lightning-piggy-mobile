@@ -58,9 +58,9 @@ describe('storeDecryptedWrap', () => {
     expect(params.passesFollowGate(STRANGER)).toBe(false);
   });
 
-  it('fails open without a contacts cache, like the alert gate', async () => {
+  it('stores nothing without a contacts cache (the refresh applies the gate)', async () => {
     await storeDecryptedWrap(ME, wrap, rumor, null);
-    expect(lastIngest().passesFollowGate(STRANGER)).toBe(true);
+    expect(mockIngest).not.toHaveBeenCalled();
   });
 });
 
@@ -89,8 +89,20 @@ describe('catchUpWrapById', () => {
     });
     mockQuery.mockResolvedValue([wrap]);
     mockUnwrap.mockReturnValue(rumor);
+    mockGetItem.mockResolvedValue(JSON.stringify([{ pubkey: FRIEND }]));
     await catchUpWrapById(ME, 'w1');
     expect(lastIngest().wraps[0].id).toBe('w1');
+  });
+
+  it('drops the wrap if the account signed out during the fetch', async () => {
+    mockIdentities
+      .mockResolvedValueOnce({ identities: [{ pubkey: ME, signerType: 'nsec', nsec: 'nsec-me' }] })
+      .mockResolvedValueOnce({ identities: [] });
+    mockQuery.mockResolvedValue([wrap]);
+    mockUnwrap.mockReturnValue(rumor);
+    mockGetItem.mockResolvedValue(JSON.stringify([{ pubkey: FRIEND }]));
+    await catchUpWrapById(ME, 'w1');
+    expect(mockIngest).not.toHaveBeenCalled();
   });
 
   it('leaves a remote signer, a missing wrap or an undecryptable one to the refresh', async () => {

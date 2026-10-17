@@ -218,8 +218,10 @@ export function useConversationLoader({
       let storeTimer: ReturnType<typeof setTimeout> | undefined;
       let storeRead = 0;
       let focused = true;
-      const unsubscribeStore = subscribeDmStorage(() => {
-        if (storeTimer) return;
+      const viewer = notification?.owner?.toLowerCase();
+      const unsubscribeStore = subscribeDmStorage((owner) => {
+        // Another account's writes (a background watch) aren't this thread's.
+        if (storeTimer || (viewer && owner.toLowerCase() !== viewer)) return;
         storeTimer = setTimeout(() => {
           storeTimer = undefined;
           const read = ++storeRead;
@@ -227,9 +229,12 @@ export function useConversationLoader({
             .then((rows) => {
               if (!isMountedRef.current || !focused || read !== storeRead) return;
               const stored = filterMessagesByProtocol(rows, protocol);
-              setMessages((prev) =>
-                keepPendingLocalRows(filterMessagesByProtocol(prev, protocol), stored),
-              );
+              // Keep the delivery ticks `load` reconciled: the store rows may
+              // not carry them yet.
+              setMessages((prev) => {
+                const previous = filterMessagesByProtocol(prev, protocol);
+                return keepPendingLocalRows(previous, reconcileDeliveryStatus(previous, stored));
+              });
             })
             .catch(() => undefined);
         }, 150);
@@ -244,7 +249,7 @@ export function useConversationLoader({
         // must not keep decrypting or prompting a signer; refocus reloads.
         fetchAbortRef.current?.abort();
       };
-    }, [pubkey, protocol, load, loadInitialConversation]),
+    }, [pubkey, protocol, load, loadInitialConversation, notification?.owner]),
   );
 
   // Generation guard so overlapping pull-to-refreshes don't drop the spinner

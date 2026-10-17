@@ -10,6 +10,11 @@ let mockTier = 'friends';
 jest.mock('../contexts/NostrContext', () => ({
   useNostrDmInbox: () => ({ armLiveDmSub: mockArm, refreshDmInbox: mockRefresh }),
 }));
+// Focus = mount here: the screen under test is always focused.
+jest.mock('@react-navigation/native', () => ({
+  useFocusEffect: (effect: () => void | (() => void)) =>
+    jest.requireActual('react').useEffect(effect, [effect]),
+}));
 jest.mock('../contexts/GroupsContext', () => ({
   useGroups: () => ({ effectiveWotTier: mockTier }),
 }));

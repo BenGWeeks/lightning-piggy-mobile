@@ -1,4 +1,5 @@
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import { InteractionManager } from 'react-native';
 import { useNostrDmInbox } from '../contexts/NostrContext';
 import { useGroups } from '../contexts/GroupsContext';
@@ -25,21 +26,24 @@ export function useDmCatchUpOnOpen(isLoggedIn: boolean): void {
     armLiveDmSub();
   }, [armLiveDmSub]);
 
-  useEffect(() => {
-    if (!isLoggedIn) return;
-    const controller = new AbortController();
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    // After the open animation and first paint, like the Messages tab (#731).
-    const handle = InteractionManager.runAfterInteractions(() => {
-      timer = setTimeout(() => {
-        const { refreshDmInbox: refresh, includeNonFollows } = latest.current;
-        void refresh({ includeNonFollows, signal: controller.signal }).catch(() => {});
-      }, 120);
-    });
-    return () => {
-      handle.cancel();
-      if (timer) clearTimeout(timer);
-      controller.abort();
-    };
-  }, [isLoggedIn]);
+  // On focus, not mount: a chat kept underneath another screen does nothing.
+  useFocusEffect(
+    useCallback(() => {
+      if (!isLoggedIn) return;
+      const controller = new AbortController();
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      // After the open animation and first paint, like the Messages tab (#731).
+      const handle = InteractionManager.runAfterInteractions(() => {
+        timer = setTimeout(() => {
+          const { refreshDmInbox: refresh, includeNonFollows } = latest.current;
+          void refresh({ includeNonFollows, signal: controller.signal }).catch(() => {});
+        }, 120);
+      });
+      return () => {
+        handle.cancel();
+        if (timer) clearTimeout(timer);
+        controller.abort();
+      };
+    }, [isLoggedIn]),
+  );
 }

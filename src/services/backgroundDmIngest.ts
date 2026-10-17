@@ -65,8 +65,9 @@ export async function loadFollowedPubkeys(pubkey: string): Promise<Set<string> |
 /**
  * Store a wrap decrypted outside the inbox refresh, through the inbox's
  * ingest. A wrap already stored is skipped by its decrypt-once gate.
- * `followed` is the background follow set (null = fail open, as the alert
- * gate does).
+ * `followed` is the background follow set. Without one nothing is stored:
+ * the alert gate fails open, but persisting a stranger's message would show
+ * it in Messages before a refresh could filter it.
  */
 export async function storeDecryptedWrap(
   owner: string,
@@ -74,6 +75,7 @@ export async function storeDecryptedWrap(
   rumor: DecodedRumor,
   followed: Set<string> | null,
 ): Promise<void> {
+  if (!followed) return;
   // Lazy: the ingest pulls in group routing and Marmot, which the watch
   // itself shouldn't load just to arm.
   const { ingestInboxWraps } =
@@ -83,8 +85,8 @@ export async function storeDecryptedWrap(
     owner,
     wraps: [{ ...wrap, decoded: rumor }],
     unwrap: (w) => w.decoded,
-    passesFollowGate: (pk) => !followed || followed.has(pk.toLowerCase()),
-    isFollowed: (pk) => !!followed?.has(pk.toLowerCase()),
+    passesFollowGate: (pk) => followed.has(pk.toLowerCase()),
+    isFollowed: (pk) => followed.has(pk.toLowerCase()),
   });
 }
 
@@ -111,7 +113,12 @@ export async function catchUpWrapById(owner: string, wrapId: string): Promise<vo
     if (!wrap || wrap.id !== wrapId) return;
     const rumor = decrypt(wrap);
     if (!rumor) return;
-    await storeDecryptedWrap(owner, wrap, rumor, await loadFollowedPubkeys(owner));
+    const followed = await loadFollowedPubkeys(owner);
+    // Signed out during the fetch (the identity and its store are gone): a
+    // late write would put a row back into the wiped store.
+    const still = await loadIdentities();
+    if (!still.identities.some((i) => i.pubkey.toLowerCase() === me)) return;
+    await storeDecryptedWrap(owner, wrap, rumor, followed);
   } catch {
     // The inbox refresh still delivers it.
   }
