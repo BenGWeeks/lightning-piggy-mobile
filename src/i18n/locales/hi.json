@@ -3395,6 +3395,8 @@
     "milliseconds": "%{count} ms",
     "operator": "संचालक और नीतियाँ",
     "runBy": "संचालक",
+    "tipOperator": "ऑपरेटर को टिप दें",
+    "tipOperatorLabel": "यह रिले चलाने वाले {{name}} को ज़ैप भेजें",
     "copyUrl": "रिले URL कॉपी करें",
     "terms_of_service": "सेवा की शर्तें",
     "privacy_policy": "गोपनीयता नीति",

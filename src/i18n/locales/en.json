@@ -3395,6 +3395,8 @@
     "milliseconds": "%{count} ms",
     "operator": "Operator & policies",
     "runBy": "Run by",
+    "tipOperator": "Tip the operator",
+    "tipOperatorLabel": "Send a zap to {{name}}, who runs this relay",
     "copyUrl": "Copy relay URL",
     "terms_of_service": "Terms of service",
     "privacy_policy": "Privacy policy",
