@@ -170,6 +170,17 @@ describe('reading wrapped reactions', () => {
     unsubscribe();
   });
 
+  it('retries a failed read of our older public reactions on the next fetch', async () => {
+    const deps = makeDeps();
+    deps.publicReactions.fetchOwnDmReactions.mockRejectedValueOnce(new Error('relays down'));
+    const source = nip17ReactionSource(deps);
+    await source.fetchReactionsForMessages([MSG]);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    await source.fetchReactionsForMessages([MSG]);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(deps.publicReactions.fetchOwnDmReactions).toHaveBeenCalledTimes(2);
+  });
+
   it('keeps stored reactions when the relay read fails', async () => {
     await upsertDmMessages([storedRumorRow(reaction(PEER, '🎉'), 'wrap-r1')]);
     const deps = makeDeps();

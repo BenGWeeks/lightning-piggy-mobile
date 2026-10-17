@@ -12,7 +12,7 @@ import { getConversationMessages, upsertDmMessages, type DmMessageRow } from '..
 import { getLocalDb } from '../services/localDb';
 import { rumorEventId, type DecodedRumor } from '../utils/nip17Unwrap';
 import type { RawGiftWrapEvent } from '../services/nostrService';
-import { backfillThreadRumorIds } from './dmRumorIdBackfill';
+import { __resetRumorIdBackfillForTests, backfillThreadRumorIds } from './dmRumorIdBackfill';
 
 const ME = 'a'.repeat(64);
 const PEER = 'b'.repeat(64);
@@ -39,6 +39,7 @@ const rumorFor = (id: string): DecodedRumor => ({
 const wrap = (id: string) => ({ id }) as unknown as RawGiftWrapEvent;
 
 beforeEach(async () => {
+  __resetRumorIdBackfillForTests();
   await (await getLocalDb()).execute('DELETE FROM dm_messages;');
 });
 
@@ -87,4 +88,34 @@ it('skips wraps that no longer decrypt and writes nothing when aborted', async (
   });
   expect(filled.size).toBe(0);
   expect((await getConversationMessages(ME, PEER)).every((r) => !r.rumorId)).toBe(true);
+});
+
+it('fetches the missing wraps by id on a warm store (the thread fetch returned none)', async () => {
+  await upsertDmMessages([row('w-old'), row('w-gone')]);
+  const fetchWraps = jest.fn(async (ids: string[]) =>
+    ids.filter((id) => id !== 'w-gone').map(wrap),
+  );
+  const filled = await backfillThreadRumorIds({
+    owner: ME,
+    conversation: PEER,
+    wraps: [],
+    fetchWraps,
+    unwrap: (w) => rumorFor(w.id),
+  });
+  expect(fetchWraps.mock.calls[0][0].sort()).toEqual(['w-gone', 'w-old']);
+  expect([...filled]).toEqual([['w-old', rumorEventId(rumorFor('w-old'))]]);
+  const byId = Object.fromEntries(
+    (await getConversationMessages(ME, PEER)).map((r) => [r.eventId, r.rumorId]),
+  );
+  expect(byId['w-old']).toBe(rumorEventId(rumorFor('w-old')));
+
+  // A wrap no relay holds any more isn't asked for again on the next open.
+  await backfillThreadRumorIds({
+    owner: ME,
+    conversation: PEER,
+    wraps: [],
+    fetchWraps,
+    unwrap: (w) => rumorFor(w.id),
+  });
+  expect(fetchWraps).toHaveBeenCalledTimes(1);
 });

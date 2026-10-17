@@ -24,7 +24,7 @@ import {
 } from './nostrDmCache';
 import { mapStoredRowsToMessages } from './conversationReadThrough';
 import { ingestInboxWraps } from './dmWrapIngest';
-import { backfillThreadRumorIds } from './dmRumorIdBackfill';
+import { backfillThreadRumorIds, fetchWrapsByIds } from './dmRumorIdBackfill';
 import { filterMessagesByProtocol } from '../utils/dmProtocol';
 import { ensureDmStoreMigrated } from './dmStoreMigrationRunner';
 import type { ConversationMessage } from './nostrContextTypes';
@@ -312,27 +312,6 @@ export async function fetchConversationFor(
       });
       nip17StoreHits += r.alreadyKnown;
       nip17FreshDecrypts += r.misses;
-      // Rows stored before received rows kept their rumor id (#1320) get it
-      // now, so old messages can be reacted to. Local keys only: a remote
-      // signer would need a prompt or round trip per old wrap.
-      if (signerType === 'nsec' && (!protocol || protocol === 'nip17')) {
-        try {
-          const filled = await backfillThreadRumorIds({
-            owner: pubkey,
-            conversation: normalized,
-            wraps: kind1059,
-            unwrap,
-            signal,
-          });
-          if (filled.size > 0) {
-            storedMessages = storedMessages.map((m) =>
-              !m.rumorId && filled.has(m.id) ? { ...m, rumorId: filled.get(m.id) } : m,
-            );
-          }
-        } catch (e) {
-          if (__DEV__) console.warn('[DmStore] rumor id backfill failed:', e);
-        }
-      }
       // Render-side filter to this thread's partner only — the rest were
       // stored for later opens of their own threads.
       for (const e of r.entries) {
@@ -357,6 +336,34 @@ export async function fetchConversationFor(
   // via `mergeConversationMessages` Map semantics (and retires any optimistic
   // local- row its relay echo just replaced — the store-side upsert did the
   // same for the persisted rows).
+  // Rows stored before received rows kept their rumor id (#1320) get it now,
+  // so old messages can be reacted to. Runs on warm stores too (where the
+  // inbox wrap fetch above is skipped): missing wraps are fetched by id.
+  // Local keys only: a remote signer would need a prompt or round trip per
+  // old wrap.
+  if (signerType === 'nsec' && (!protocol || protocol === 'nip17') && !signal?.aborted) {
+    try {
+      const secretKey = await getMemoisedSecretKey(pubkey);
+      const filled = secretKey
+        ? await backfillThreadRumorIds({
+            owner: pubkey,
+            conversation: normalized,
+            wraps: kind1059,
+            fetchWraps: (ids) => fetchWrapsByIds(ids, readRelays, signal),
+            unwrap: (wrap) => unwrapWrapNsec(wrap, secretKey),
+            signal,
+          })
+        : new Map<string, string>();
+      if (filled.size > 0) {
+        storedMessages = storedMessages.map((m) =>
+          !m.rumorId && filled.has(m.id) ? { ...m, rumorId: filled.get(m.id) } : m,
+        );
+      }
+    } catch (e) {
+      if (__DEV__) console.warn('[DmStore] rumor id backfill failed:', e);
+    }
+  }
+
   const merged = mergeConversationMessages(
     storedMessages,
     protocol ? filterMessagesByProtocol(decrypted, protocol) : decrypted,

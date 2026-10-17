@@ -104,13 +104,17 @@ export function nip17ReactionSource(deps: Nip17ReactionDeps): Nip17ReactionSourc
       (e) => e.kind === kind,
     );
 
-  // Our own public reactions, read once per thread open. Never rejects.
+  // Our own public reactions, read once per thread open. Never rejects; a
+  // failed read isn't kept, so the next fetch tries again.
   let ownPublic: Promise<ChatReactionEvent[]> | null = null;
   const ownPublicReactions = () =>
     (ownPublic ??= deps.publicReactions
       .fetchOwnDmReactions()
       .then((events) => events.filter((e) => e.pubkey.toLowerCase() === me))
-      .catch(() => []));
+      .catch(() => {
+        ownPublic = null;
+        return [];
+      }));
 
   // Store our own reaction / retraction before sending it, so it survives a
   // restart even if the relay echo of our self-copy never arrives. The echo
