@@ -34,6 +34,10 @@ export type { Nip171GroupMeta } from './nip171Membership';
 export const NIP171_MAX_GROUPS = 100;
 /** Unanswered invitations kept; more are dropped, so strangers can't flood. */
 export const NIP171_MAX_PENDING = 20;
+/** Tickets kept per group (a new epoch is always taken: that's a rotation). */
+export const NIP171_MAX_TICKETS_PER_GROUP = 8;
+/** How far ahead of now a ticket's time may be (clock skew). */
+const FUTURE_SKEW_SECS = 10 * 60;
 
 export interface Nip171GroupState {
   keys: Nip171GroupKeys;
@@ -66,7 +70,13 @@ const loads = new Map<string, Promise<void>>();
 const listeners = new Set<(owner: string) => void>();
 const EMPTY_INVITATIONS: Nip171Invitation[] = [];
 
+// Bumped on every change, so `nip171GroupsFor` can hand back the same array
+// (and the same row objects) until something actually changed.
+const versions = new Map<string, number>();
+const groupRows = new Map<string, { version: number; rows: Group[] }>();
+
 const emit = (owner: string) => {
+  versions.set(owner, (versions.get(owner) ?? 0) + 1);
   for (const listener of listeners) {
     try {
       listener(owner);
@@ -171,6 +181,15 @@ export function nip171Invitations(owner: string | null): Nip171Invitation[] {
 
 /** App `Group` rows for GroupsContext (accepted groups only). */
 export function nip171GroupsFor(owner: string): Group[] {
+  const version = versions.get(owner) ?? 0;
+  const cached = groupRows.get(owner);
+  if (cached?.version === version) return cached.rows;
+  const rows = buildGroupRows(owner);
+  groupRows.set(owner, { version, rows });
+  return rows;
+}
+
+function buildGroupRows(owner: string): Group[] {
   return [...nip171GroupStates(owner)].map(([groupPubkey, s]) => ({
     id: nip171GroupId(groupPubkey),
     name: s.meta.name?.trim() || '',
@@ -201,6 +220,23 @@ export async function ingestNip171Ticket(
     decision?.status === 'accepted' ||
     state?.invitations.some((i) => i.groupPubkey === ticket.groupPubkey);
   if (!known && (state?.invitations.length ?? 0) >= NIP171_MAX_PENDING) return true;
+  // A far-future time would also outrank every later decline.
+  if (ticket.createdAt > Math.floor(Date.now() / 1000) + FUTURE_SKEW_SECS) return true;
+  if (known) {
+    // Bounded per group: repeats of a key we hold, and more of the same epochs
+    // past the cap, are dropped; a higher epoch (a key rotation) is kept.
+    const held = (await loadNip171Tickets(owner)).filter(
+      (t) => t.groupPubkey === ticket.groupPubkey,
+    );
+    const sameKey = held.some(
+      (t) =>
+        t.epoch === ticket.epoch &&
+        t.epochSecretHex === ticket.epochSecretHex &&
+        t.createdAt >= ticket.createdAt,
+    );
+    const rotation = held.every((t) => t.epoch < ticket.epoch);
+    if (sameKey || (held.length >= NIP171_MAX_TICKETS_PER_GROUP && !rotation)) return true;
+  }
   await saveNip171Ticket(owner, ticket);
   await reload(owner);
   return true;
@@ -289,6 +325,7 @@ export async function setNip171GroupMeta(
 /** Account wipe / sign-out: drop the in-memory keys and the records. */
 export async function forgetNip171Account(owner: string): Promise<void> {
   owners.delete(owner);
+  groupRows.delete(owner);
   loads.delete(owner);
   await Promise.all([nip171MetaStore.remove(owner), nip171StatusStore.remove(owner)]);
   emit(owner);
@@ -296,6 +333,8 @@ export async function forgetNip171Account(owner: string): Promise<void> {
 
 export function __resetNip171GroupsForTests(): void {
   owners.clear();
+  versions.clear();
+  groupRows.clear();
   loads.clear();
   listeners.clear();
 }

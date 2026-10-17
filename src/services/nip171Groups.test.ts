@@ -12,6 +12,8 @@ import {
   forgetNip171Group,
   isNip171GroupIdentity,
   NIP171_MAX_PENDING,
+  NIP171_MAX_TICKETS_PER_GROUP,
+  noteNip171Members,
   nip171Invitations,
   ingestNip171Ticket,
   loadNip171Groups,
@@ -122,6 +124,34 @@ describe('ingestNip171Ticket', () => {
     await expect(declineNip171Invitation(ME, GROUP)).rejects.toThrow('full');
     // Nothing deleted without the record that keeps the ticket out.
     expect(mockStore).toHaveLength(1);
+  });
+
+  it('bounds tickets per group, refusing future times and repeats but taking rotations', async () => {
+    await join(ME);
+    const now = Math.floor(Date.now() / 1000);
+    // Far future: refused (it would also outrank every later decline).
+    await ingestNip171Ticket(ME, anagramTicket(ME, 0, now + 3600));
+    expect(mockStore).toHaveLength(1);
+    // The same key again, no newer: a repeat.
+    await ingestNip171Ticket(ME, anagramTicket(ME, 0, 1000));
+    expect(mockStore).toHaveLength(1);
+    // Same epoch, newer times: kept up to the cap, then dropped.
+    for (let i = 1; i <= NIP171_MAX_TICKETS_PER_GROUP + 3; i++) {
+      await ingestNip171Ticket(ME, anagramTicket(ME, 0, 1000 + i));
+    }
+    expect(mockStore).toHaveLength(NIP171_MAX_TICKETS_PER_GROUP);
+    // A higher epoch is a key rotation: always taken.
+    await ingestNip171Ticket(ME, anagramTicket(ME, 1, 5000));
+    expect(mockStore).toHaveLength(NIP171_MAX_TICKETS_PER_GROUP + 1);
+    expect(nip171GroupState(ME, GROUP)!.keys.epoch).toBe(1);
+  });
+
+  it('hands back the same group rows until something changes', async () => {
+    await join(ME);
+    const first = nip171GroupsFor(ME);
+    expect(nip171GroupsFor(ME)).toBe(first);
+    noteNip171Members(ME, GROUP, [PEER]);
+    expect(nip171GroupsFor(ME)).not.toBe(first);
   });
 
   it('caps unanswered invitations', async () => {
